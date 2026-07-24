@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+
+from db_fetch import fetch_all_exams
 
 app = FastAPI()
 
@@ -20,3 +22,11 @@ async def webhook(request: Request):
     data = await request.json()
     print(data)
     return {"status": "ok"}
+
+
+@app.get("/exams")
+async def get_exams():
+    try:
+        return {"records": fetch_all_exams()}
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
