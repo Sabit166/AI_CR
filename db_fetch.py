@@ -58,3 +58,54 @@ def fetch_all_exams() -> list[dict]:
         raise RuntimeError('Unexpected response format from Supabase')
 
     return data
+
+
+def create_exam(payload: dict) -> dict:
+    return _request_json('POST', 'Exams', payload)
+
+
+def update_exam(exam_id: int, payload: dict) -> dict:
+    return _request_json('PATCH', f'Exams?id=eq.{exam_id}', payload)
+
+
+def delete_exam(exam_id: int) -> dict:
+    return _request_json('DELETE', f'Exams?id=eq.{exam_id}')
+
+
+def _request_json(method: str, path: str, payload: dict | None = None) -> dict:
+    supabase_url = _load_env_value('SUPABASE_URL')
+    supabase_api_key = _load_env_value('SUPABASE_API_KEY')
+
+    if not supabase_url or not supabase_api_key:
+        raise RuntimeError('SUPABASE_URL and SUPABASE_API_KEY must be set')
+
+    endpoint = f"{supabase_url.rstrip('/')}/{path.lstrip('/')}"
+    body = None if payload is None else json.dumps(payload).encode('utf-8')
+    headers = {
+        'apikey': supabase_api_key,
+        'Authorization': f'Bearer {supabase_api_key}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    }
+    request = Request(endpoint, data=body, headers=headers, method=method)
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            response_body = response.read().decode('utf-8')
+    except HTTPError as error:
+        raise RuntimeError(f'Failed to {method.lower()} Exams record: {error.code} {error.reason}') from error
+    except URLError as error:
+        raise RuntimeError(f'Failed to reach Supabase: {error.reason}') from error
+
+    if not response_body:
+        return {"status": "ok"}
+
+    try:
+        parsed = json.loads(response_body)
+    except json.JSONDecodeError:
+        return {"status": "ok", "raw": response_body}
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    return {"data": parsed}
