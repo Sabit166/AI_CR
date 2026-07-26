@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -28,13 +29,27 @@ def _load_env_value(name: str) -> str | None:
 
 
 def fetch_all_exams() -> list[dict]:
+    return fetch_exams()
+
+
+def fetch_exams(
+    select_columns: list[str] | None = None,
+    filters: dict[str, str] | None = None,
+) -> list[dict]:
     supabase_url = _load_env_value('SUPABASE_URL')
     supabase_api_key = _load_env_value('SUPABASE_API_KEY')
 
     if not supabase_url or not supabase_api_key:
         raise RuntimeError('SUPABASE_URL and SUPABASE_API_KEY must be set')
 
-    endpoint = f"{supabase_url.rstrip('/')}/Exams?select=*"
+    query_params: dict[str, str] = {
+        'select': '*' if not select_columns else ','.join(select_columns),
+    }
+    if filters:
+        for key, value in filters.items():
+            query_params[key] = f'eq.{value}'
+
+    endpoint = f"{supabase_url.rstrip('/')}/Exams?{urlencode(query_params, quote_via=quote, safe=',*')}"
     request = Request(
         endpoint,
         headers={
@@ -58,6 +73,28 @@ def fetch_all_exams() -> list[dict]:
         raise RuntimeError('Unexpected response format from Supabase')
 
     return data
+
+
+def fetch_exam_column_values(column: str) -> list[str]:
+    rows = fetch_exams(select_columns=[column])
+    values = [row[column] for row in rows if row.get(column) is not None]
+    return list(dict.fromkeys(values))
+
+
+def fetch_exam_rows(
+    filter_column: str,
+    matched_value: str,
+    return_columns: list[str],
+) -> list[dict]:
+    if return_columns == ['*']:
+        select_columns = ['*']
+    else:
+        select_columns = list(dict.fromkeys(return_columns + ['Course Title', 'Course Code']))
+
+    return fetch_exams(
+        select_columns=select_columns,
+        filters={filter_column: matched_value},
+    )
 
 
 def create_exam(payload: dict) -> dict:
