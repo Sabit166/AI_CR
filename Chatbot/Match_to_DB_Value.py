@@ -1,6 +1,5 @@
 import os
-import sys
-from pathlib import Path
+from datetime import date
 from dotenv import load_dotenv
 from openai import OpenAI
 import json
@@ -27,6 +26,8 @@ async def match_to_db_value(
 ) -> dict:
     
     values_list = "\n".join(f"- {v}" for v in db_values)
+    today_date = date.today().strftime("%Y-%m-%d") # Date
+    today_day = date.today().strftime("%A") # Day of the week
     
     response = client.chat.completions.create(
         model=_require_model(),
@@ -36,6 +37,8 @@ async def match_to_db_value(
                 "role": "system",
                 "content": f"""You match a student's query to exact database values and identify what they want returned.
 
+Today's date: {today_date}
+Today's day: {today_day}
 Filter column: {filter_column}
 Available values in DB:
 {values_list}
@@ -43,12 +46,16 @@ Available values in DB:
 Return ONLY a JSON object:
 {{
   "matched_value": "<exact value from the list above, or null if no match>",
-  "return_columns": ["<col1>", "<col2>"]
+  "return_columns": ["<col1>", "<col2>", "..."],
 }}
 
 Available return columns: "Course Code", "Course Title", "Course Teacher", 
 "Course Section", "Exam Type", "Exam Day", "Exam Date", "Syllabus", 
 "Exam Notes Drive Link"
+
+You are provided with today's date and day, if student asks about exams, routine, updates on:
+tomorrow: return values of date column that is tomorrow's date
+next week: return values of date column that from next Sunday to next Thursday (inclusive)
 
 Use ["*"] if student wants general info."""
             },
@@ -76,4 +83,4 @@ if __name__ == "__main__":
     parser.add_argument("db_values", help="JSON array of available database values")
     args = parser.parse_args()
 
-    print(asyncio.run(match_to_db_value(args.message, args.filter_column, json.loads(args.db_values))))
+    print(asyncio.run(match_to_db_value(args.message, args.filter_column, args.db_values)))

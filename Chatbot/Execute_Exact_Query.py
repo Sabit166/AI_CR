@@ -26,4 +26,4 @@ if __name__ == "__main__":
     parser.add_argument("return_columns", help="JSON array of columns to return")
     args = parser.parse_args()
 
-    print(fetch_exam_rows(args.filter_column, args.matched_value, __import__("json").loads(args.return_columns)))
+    print(fetch_exam_rows(args.filter_column, args.matched_value, args.return_columns))
