@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
+from Chatbot.chatbot import chat
 from db_fetch import create_exam, delete_exam, fetch_all_exams, update_exam
 
 load_dotenv()
@@ -73,7 +74,10 @@ async def webhook(request: Request):
             message = event.get("message", {})
 
             if sender.get("id") and message and not message.get("is_echo"):
-                _send_page_message(sender["id"], "Hello! How can I help you?")
+                user_message = message.get("text")
+                if user_message:
+                    reply = await chat(user_message)
+                    _send_page_message(sender["id"], reply)
 
     return {"status": "ok"}
 
