@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from Chatbot.chatbot import chat
+from Chatbot.Chatbot import chat
 from db_fetch import create_exam, delete_exam, fetch_all_exams, update_exam
 
 load_dotenv()
