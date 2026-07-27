@@ -7,14 +7,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from Classify_Query import classify_query
-from Fetch_Column_Values import fetch_column_values
-from Identify_Filter_Column import identify_filter_column
-from Is_relevant import is_relevant
-from Match_to_DB_Value import match_to_db_value
-from Execute_Exact_Query import execute_exact_query
-from Generate_Answer import generate_answer
-from Extract_Json_Response import extract_json_response
+from .Classify_Query import classify_query
+from .Fetch_Column_Values import fetch_column_values
+from .Identify_Filter_Column import identify_filter_column
+from .Is_relevant import is_relevant
+from .Match_to_DB_Value import match_to_db_value
+from .Execute_Exact_Query import execute_exact_query
+from .Generate_Answer import generate_answer
+from .Extract_Json_Response import extract_json_response
 
 
 async def chat(req) -> str:
