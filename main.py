@@ -1,8 +1,16 @@
+import json
+import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
 from db_fetch import create_exam, delete_exam, fetch_all_exams, update_exam
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -17,6 +25,32 @@ app.add_middleware(
 # Run project: d:\AI_CR\env\Scripts\uvicorn.exe main:app --host 127.0.0.1 --port 8001
 
 VERIFY_TOKEN = "exam_bot_verify_2026"
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+
+
+def _send_page_message(recipient_id: str, text: str) -> None:
+    if not PAGE_ACCESS_TOKEN:
+        raise RuntimeError("PAGE_ACCESS_TOKEN must be set")
+
+    url = f"https://graph.facebook.com/v23.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": text},
+    }
+    request = UrlRequest(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            response.read()
+    except HTTPError as error:
+        raise RuntimeError(f"Failed to send Messenger reply: {error.code} {error.reason}") from error
+    except URLError as error:
+        raise RuntimeError(f"Failed to reach Facebook Graph API: {error.reason}") from error
 
 @app.get("/webhook")
 async def verify(
@@ -32,6 +66,15 @@ async def verify(
 async def webhook(request: Request):
     data = await request.json()
     print(data)
+
+    for entry in data.get("entry", []):
+        for event in entry.get("messaging", []):
+            sender = event.get("sender", {})
+            message = event.get("message", {})
+
+            if sender.get("id") and message and not message.get("is_echo"):
+                _send_page_message(sender["id"], "Hello! How can I help you?")
+
     return {"status": "ok"}
 
 
