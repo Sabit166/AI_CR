@@ -34,7 +34,7 @@ def fetch_all_exams() -> list[dict]:
 
 def fetch_exams(
     select_columns: list[str] | None = None,
-    filters: dict[str, str] | None = None,
+    filters: dict[str, str | tuple[str, str]] | None = None,
 ) -> list[dict]:
     supabase_url = _load_env_value('SUPABASE_URL')
     supabase_api_key = _load_env_value('SUPABASE_API_KEY')
@@ -42,12 +42,17 @@ def fetch_exams(
     if not supabase_url or not supabase_api_key:
         raise RuntimeError('SUPABASE_URL and SUPABASE_API_KEY must be set')
 
-    query_params: dict[str, str] = {
-        'select': '*' if not select_columns else ','.join(select_columns),
-    }
+    query_params: list[tuple[str, str]] = [
+        ('select', '*' if not select_columns else ','.join(select_columns)),
+    ]
     if filters:
         for key, value in filters.items():
-            query_params[key] = f'eq.{value}'
+            if isinstance(value, tuple):
+                start_value, end_value = value
+                query_params.append((key, f'gte.{start_value}'))
+                query_params.append((key, f'lte.{end_value}'))
+            else:
+                query_params.append((key, f'eq.{value}'))
 
     endpoint = f"{supabase_url.rstrip('/')}/Exams?{urlencode(query_params, quote_via=quote, safe=',*')}"
     request = Request(
@@ -94,6 +99,27 @@ def fetch_exam_rows(
     return fetch_exams(
         select_columns=select_columns,
         filters={filter_column: matched_value},
+    )
+
+
+def fetch_exam_rows_by_range(
+    filter_column: str,
+    date_range: dict[str, str],
+    return_columns: list[str],
+) -> list[dict]:
+    if return_columns == ['*']:
+        select_columns = ['*']
+    else:
+        select_columns = list(dict.fromkeys(return_columns + ['Course Title', 'Course Code']))
+
+    start_value = date_range.get('from')
+    end_value = date_range.get('to')
+    if not start_value or not end_value:
+        raise RuntimeError('matched_range must include from and to values')
+
+    return fetch_exams(
+        select_columns=select_columns,
+        filters={filter_column: (start_value, end_value)},
     )
 
 

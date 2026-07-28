@@ -1,6 +1,7 @@
 import sys
 import argparse
 import asyncio
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -12,7 +13,7 @@ from .Fetch_Column_Values import fetch_column_values
 from .Identify_Filter_Column import identify_filter_column
 from .Is_relevant import is_relevant
 from .Match_to_DB_Value import match_to_db_value
-from .Execute_Exact_Query import execute_exact_query
+from .Execute_Exact_Query import execute_exact_query, execute_range_query
 from .Generate_Answer import generate_answer
 from .Extract_Json_Response import extract_json_response
 
@@ -35,16 +36,30 @@ async def chat(req) -> str:
     
     # Step 3: Match user input → exact DB value + return columns
     match = await match_to_db_value(req, filter_column, db_values)
-    
-    if not match["matched_value"]:
+
+    matched_values = match.get("matched_values") or []
+    matched_range = match.get("matched_range")
+    return_columns = match.get("return_columns") or ["*"]
+
+    if not matched_values and not matched_range:
         return extract_json_response({"reply": "I couldn't find a match. Could you be more specific?"})
-    
+
     # Step 4: Exact Supabase query (no LLM)
-    rows = await execute_exact_query(
-        filter_column,
-        match["matched_value"],
-        match["return_columns"]
-    )
+    if matched_range:
+        rows = await execute_range_query(
+            filter_column,
+            matched_range,
+            return_columns,
+        )
+    else:
+        rows = []
+        seen_rows: set[str] = set()
+        for matched_value in matched_values:
+            for row in await execute_exact_query(filter_column, matched_value, return_columns):
+                row_key = json.dumps(row, sort_keys=True, default=str)
+                if row_key not in seen_rows:
+                    seen_rows.add(row_key)
+                    rows.append(row)
     
     if not rows:
         return extract_json_response({"reply": "No exam records found for that."})
