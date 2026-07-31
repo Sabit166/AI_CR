@@ -8,6 +8,12 @@ if str(ROOT) not in sys.path:
 from db_fetch import fetch_exams
 
 
+ALL_COLUMNS = [
+    "Course Code", "Course Title", "Course Teacher", "Course Section",
+    "Exam Type", "Exam Day", "Exam Date", "Syllabus", "Exam Notes Drive Link"
+]
+
+
 def _day_bounds(day_str: str) -> tuple[str, str]:
     return f"{day_str}T00:00:00", f"{day_str}T23:59:59"
 
@@ -17,13 +23,6 @@ async def execute_combined_query(
     date_filter: dict,
     return_columns: list[str],
 ) -> list[dict]:
-    """
-    Builds and runs ONE combined Supabase query:
-      - AND across different columns (Course Code AND Exam Type, etc.)
-      - OR within a single column's multiple matched values
-      - special two-step handling for "nearest exam" so ties on the same
-        date are all returned, not just one row
-    """
 
     # Non-date filters first — AND across columns, OR (in.) within one column
     filters: dict[str, dict] = {}
@@ -35,8 +34,9 @@ async def execute_combined_query(
         else:
             filters[column] = {"op": "in", "values": values}
 
+    # Never select "*" — always use explicit list to exclude id
     if return_columns == ["*"]:
-        select_columns = ["*"]
+        select_columns = ALL_COLUMNS
     else:
         select_columns = list(dict.fromkeys(return_columns + ["Course Title", "Course Code"]))
 
@@ -55,7 +55,7 @@ async def execute_combined_query(
         filters["Exam Date"] = {"op": "range", "from": start, "to": end}
         return fetch_exams(select_columns=select_columns, filters=filters, order="Exam Date.asc")
 
-    # Nearest upcoming exam — two-step, so ties on the same date are all returned
+    # Nearest upcoming exam — two-step so ties on the same date are all returned
     if mode == "nearest" and date_filter.get("target"):
         probe_filters = dict(filters)
         probe_filters["Exam Date"] = {"op": "gte", "value": f"{date_filter['target']}T00:00:00"}

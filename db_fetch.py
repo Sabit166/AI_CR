@@ -55,7 +55,7 @@ def fetch_exams(
         raise RuntimeError('SUPABASE_URL and SUPABASE_API_KEY must be set')
 
     query_params: list[tuple[str, str]] = [
-        ('select', '*' if not select_columns else ','.join(select_columns)),
+        ('select', 'Course Code,Course Title,Course Teacher,Course Section,Exam Type,Exam Day,Exam Date,Syllabus,Exam Notes Drive Link' if not select_columns else ','.join(select_columns)),
     ]
 
     if filters:
