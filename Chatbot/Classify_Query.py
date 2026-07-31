@@ -42,8 +42,8 @@ NOT RELEVANT: anything outside the above (greetings, general questions, unrelate
 A query can reference MORE THAN ONE column at once — identify EVERY column the user is FILTERING BY.
 
 Available columns:
-  "Course Code"     — e.g. CSE-415, CSE-429
-  "Course Title"    — e.g. HCI, SDP, CI, Human Computer Interface
+  "Course Code"     — e.g. CSE-415, CSE-429, GEEM-433
+  "Course Title"    — e.g. HCI, SDP, CI, Human Computer Interface, Ethics and Morality
   "Course Teacher"  — e.g. Shahriar sir, Mahbub sir
   "Course Section"  — e.g. section A, B
   "Exam Type"       — CT-1/2/3, Mid, Final, Quiz, Assignment, Project Update, Project Presentation
@@ -78,14 +78,11 @@ Available columns:
       → asking to be TOLD the date, no filtering expression → filter_columns: ["Course Code", "Exam Type"]
 
 ### Other rules
-  - Course referenced by abbreviation/short form (CI, HCI, DS) → "Course Title"
-  - Course referenced by code pattern (CSE-XXX) → "Course Code"
+  - Course referenced by abbreviation/short form (CI, HCI, SDP, GEEM) → "Course Title"
+  - Course referenced by code pattern (CSE/GEEM-XXX) → "Course Code"
    - Only add "Exam Type" if the query contains an EXPLICIT exam type keyword such as:
-    CT, CT-1, CT-2, CT-3, Class Test, Mid, Midterm, Final, Quiz, Assignment,
-    Project Update, Project Presentation
-  - The word "exam" alone is NOT an exam type — do NOT add "Exam Type" just because the word "exam" appears in the query.
-  - An unknown or unrecognized word (e.g. "GEEM", "MATH", "PHY") is NOT an exam type. If it looks like a department prefix or course abbreviation, treat it as "Course Title" or "Course Code", NOT "Exam Type".
-  - "Exam Type" must only be added when the exam type keyword is unambiguous and explicit. When in doubt, do NOT add "Exam Type".
+    CT(Class Test), CT(Class Test)-1, CT-2, CT-3, Class Test, Mid, Midterm, Final, Quiz, Assignment, Presentation, Project Update, Project Presentation
+  - The word "exam" alone is NOT an exam type — do NOT add "Exam Type" just because the word "exam" appears in the query. Only add "Exam Type" if the query contains the above key words.
   Compare:
     "On which date is the next HCI exam"     → "exam" alone → do NOT add "Exam Type"
     "On which date is the next HCI Mid exam" → "Mid" is explicit → ADD "Exam Type"
