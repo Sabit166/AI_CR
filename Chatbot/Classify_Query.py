@@ -80,7 +80,16 @@ Available columns:
 ### Other rules
   - Course referenced by abbreviation/short form (CI, HCI, DS) → "Course Title"
   - Course referenced by code pattern (CSE-XXX) → "Course Code"
-  - Any exam-type keyword (CT, Mid, Final, Quiz etc.) → "Exam Type"
+   - Only add "Exam Type" if the query contains an EXPLICIT exam type keyword such as:
+    CT, CT-1, CT-2, CT-3, Class Test, Mid, Midterm, Final, Quiz, Assignment,
+    Project Update, Project Presentation
+  - The word "exam" alone is NOT an exam type — do NOT add "Exam Type" just because the word "exam" appears in the query.
+  - An unknown or unrecognized word (e.g. "GEEM", "MATH", "PHY") is NOT an exam type. If it looks like a department prefix or course abbreviation, treat it as "Course Title" or "Course Code", NOT "Exam Type".
+  - "Exam Type" must only be added when the exam type keyword is unambiguous and explicit. When in doubt, do NOT add "Exam Type".
+  Compare:
+    "On which date is the next HCI exam"     → "exam" alone → do NOT add "Exam Type"
+    "On which date is the next HCI Mid exam" → "Mid" is explicit → ADD "Exam Type"
+    "Next CT-2 of CSE-415"                   → "CT-2" is explicit → ADD "Exam Type"
   - Any teacher name/nickname/honorific (sir/miss) → "Course Teacher"
   - An explicit weekday name with no relative-date computation implied → "Exam Day"
   - If a listed column has no filtering signal in the query, do not include it.
@@ -98,6 +107,9 @@ Examples:
   "Next CSE-401 exam"                         → ["Course Code", "Exam Date"]
   "Mid exam of cse 415"                       → ["Exam Type", "Course Code"]
   "Exams on Monday"                           → ["Exam Day"]
+  "On which date is the next HCI exam"        → ["Course Title", "Exam Date"]
+  "Next GEEM exam date"                       → ["Course Title", "Exam Date"]
+  "Next GEEM-433 exam date"                   → ["Course Code", "Exam Date"]
   "Hello, how are you"                        → not relevant
 
 ## Output Format
