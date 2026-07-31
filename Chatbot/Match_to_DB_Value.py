@@ -1,8 +1,8 @@
 import os
+import json
 from datetime import date, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
-import json
 
 load_dotenv()
 
@@ -47,119 +47,109 @@ def _build_date_context() -> dict:
     }
 
 
-def _parse_db_values(db_values: list[str] | str) -> list[str]:
-    if isinstance(db_values, list):
-        return db_values
-    try:
-        return json.loads(db_values)
-    except json.JSONDecodeError:
-        return json.loads(db_values.replace("'", '"'))
-
-
-# Python matches DB values by date prefix — no LLM involved
-def _match_dates_from_db(target_date: str, db_values: list[str]) -> list[str]:
-    return [v for v in db_values if v.startswith(target_date)]
-
-
-def _find_nearest_date(db_values: list[str], from_date: str) -> list[str]:
-    future = sorted([v for v in db_values if v[:10] >= from_date])
-    if not future:
-        return []
-    nearest_date = future[0][:10]
-    return [v for v in future if v.startswith(nearest_date)]
-
-
 async def match_to_db_value(
     user_message: str,
-    filter_column: str,
-    db_values: list[str] | str
+    filter_columns: list[str],
+    column_values: dict[str, list[str]],
 ) -> dict:
+    """
+    Single LLM call that, given a (possibly multi-column) query:
+      1. Matches the query text to the correct DB value(s) for EACH non-date filter column.
+      2. Resolves any date term into a structured date filter (mode + target/range) —
+         using ONLY the Python-computed date table below, never matching literal DB timestamps.
+      3. Identifies which columns the student wants returned.
 
-    parsed_values = _parse_db_values(db_values)
-    values_list   = "\n".join(f"- {v}" for v in parsed_values)
-    d             = _build_date_context()
+    Returns:
+        {
+          "column_matches": {"<column>": ["<value>", ...], ...},
+          "date_filter": {"mode": "exact"|"nearest"|"range"|None, "target": str|None, "range": {...}|None},
+          "return_columns": ["<column>", ...]
+        }
+    """
+
+    d = _build_date_context()
+    has_date_column = "Exam Date" in filter_columns
+
+    columns_block_parts = []
+    for column, values in column_values.items():
+        values_list = "\n".join(f"    - {v}" for v in values)
+        columns_block_parts.append(f"  {column}:\n{values_list}")
+    columns_block = "\n\n".join(columns_block_parts) if columns_block_parts else "  (none — this query has no non-date filter columns)"
 
     system_prompt = f"""You are a query planner for a university exam chatbot.
+A query can reference MULTIPLE filter columns at once (e.g. course + exam type + date).
+Resolve EVERY filter column into a precise, structured filter.
 
-━━━ DATE CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Today         : {d['today']} ({d['day_name']})
-Tomorrow      : {d['tomorrow']}
-3 days later  : {d['three_days']}
-This week     : {d['week_from']} → {d['week_to']}
-Next week     : {d['next_sunday']} → {d['next_thursday']}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ DATE CONTEXT (use ONLY if Exam Date is a filter column) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Today            : {d['today']} ({d['day_name']})
+Tomorrow         : {d['tomorrow']}
+3 days later     : {d['three_days']}
+This week        : {d['week_from']} → {d['week_to']}
+Next week        : {d['next_sunday']} → {d['next_thursday']}
+Exam Date is a filter for this query: {"YES" if has_date_column else "NO"}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━ YOUR TASK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Filter column : {filter_column}
-DB values     :
-{values_list}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ NON-DATE FILTER COLUMNS AND THEIR DB VALUES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{columns_block}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━ OUTPUT FORMAT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Return ONLY this JSON, nothing else:
+━━━ OUTPUT FORMAT — return ONLY this JSON, nothing else ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{
-  "date_target"    : "<YYYY-MM-DD if query is date-based, else null>",
-  "date_mode"      : "<'exact' | 'nearest' | 'range' | null>",
-  "range"          : {{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}} or null,
-  "matched_values" : ["<exact value from DB list>"],
-  "return_columns" : ["<col>", ...]
+  "column_matches": {{
+    "<column name>": ["<exact value(s) from that column's DB list above>"]
+  }},
+  "date_filter": {{
+    "mode": "exact" | "nearest" | "range" | null,
+    "target": "YYYY-MM-DD" or null,
+    "range": {{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}} or null
+  }},
+  "return_columns": ["<column>", ...]
 }}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━ DATE MODE RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Use date_mode "exact" + date_target for:
-  "today"              → date_target: {d['today']}
-  "tomorrow"/"next day"→ date_target: {d['tomorrow']}
-  "three days later"   → date_target: {d['three_days']}
-  Leave matched_values as [] — Python will fill it.
-
-Use date_mode "nearest" for:
-  "next exam" / "upcoming exam" / "which exam is next"
-  → date_target: {d['today']}
-  Leave matched_values as [] — Python will fill it.
-
-Use date_mode "range" + range for:
-  "this week"  → range: {d['week_from']} to {d['week_to']}
-  "next week"  → range: {d['next_sunday']} to {d['next_thursday']}
-  "in X days"  → range: today+X to today+X
-  Leave matched_values as [] — Python will fill it.
-
-━━━ NON-DATE RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-For Course Title, Course Teacher, Exam Type etc:
-  → date_target: null, date_mode: null, range: null
-  → Pick ALL matching DB values into matched_values
-  → Match abbreviations, nicknames, typos to full names
+━━━ RULE A — non-date columns (Course Code, Course Title, Course Teacher, Course Section, Exam Type, Exam Day) ━━━
+  - For EVERY such column shown above, pick the exact DB value(s) that match the query.
+  - Match abbreviations, short forms, nicknames, honorifics, and typos to the full DB value.
+  - A column can match MORE THAN ONE value if the query implies it (e.g. "CT-1 and CT-2").
+  - If a listed column has no match in the query, still include it with an empty list — do not omit it.
+  - NEVER invent a value that isn't in the DB list shown above.
 
   Examples:
-  "CI exam"      + [Computer Interfacing, Human Computer Interface] → ["Computer Interfacing"]
-  "HCI and CI"   + [Computer Interfacing, Human Computer Interface] → ["Computer Interfacing", "Human Computer Interface"]
-  "Shahriar sir" + [Shahriar Sajjad, Fairooz Tasnia]               → ["Shahriar Sajjad"]
-  "Fairuz miss"  + [Shahriar Sajjad, Fairooz Tasnia]               → ["Fairooz Tasnia"]
-  "CT exams"     + [CT-1, CT-2, Midterm]                           → ["CT-1", "CT-2"]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "CI exam"              + Course Title[Computer Interfacing, Human Computer Interface]        → ["Computer Interfacing"]
+    "HCI and CI exam"      + Course Title[Computer Interfacing, Human Computer Interface]        → ["Computer Interfacing", "Human Computer Interface"]
+    "Shahriar sir"         + Course Teacher[Shahriar Sajjad, Fairooz Tasnia]                     → ["Shahriar Sajjad"]
+    "Mid exam of cse 415"  + Course Code[CSE-401, CSE-415] + Exam Type[Mid, Final, CT-1]         → Course Code: ["CSE-415"], Exam Type: ["Mid"]
+    "Class Test 2 of HCI"  + Course Title[...] + Exam Type[CT-1, CT-2, Final]                    → Course Title: ["Human Computer Interface"], Exam Type: ["CT-2"]
 
-━━━ RETURN COLUMNS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Available: "Course Code", "Course Title", "Course Teacher",
-           "Course Section", "Exam Type", "Exam Day", "Exam Date",
-           "Syllabus", "Exam Notes Drive Link"
+━━━ RULE B — "Exam Date" column (date_filter) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Only fill this in if Exam Date is a filter for this query (see YES/NO flag above).
+  Otherwise leave "date_filter": {{"mode": null, "target": null, "range": null}}.
 
+  mode "exact"   → a single specific day. Use for: "today", "tomorrow", "next day", "three days later", "on 27 July"
+                   target = the resolved YYYY-MM-DD from the date context above
+  mode "nearest" → the closest upcoming exam. Use for: "next exam", "upcoming exam", "next <course/type> exam"
+                   target = {d['today']}
+  mode "range"   → a span of days. Use for: "this week", "next week", "weekly update"
+                   range.from / range.to = the resolved dates from the date context above
+
+━━━ RETURN COLUMNS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Available: "Course Code", "Course Title", "Course Teacher", "Course Section",
+           "Exam Type", "Exam Day", "Exam Date", "Syllabus", "Exam Notes Drive Link"
 Use ["*"] for general/info queries.
 
 Examples:
-  "next exam info"              → ["*"]
-  "next week updates"           → ["*"]
-  "what exam is tomorrow"       → ["Course Title", "Course Code"]
-  "which course exam tomorrow"  → ["Course Code", "Course Title"]
-  "syllabus for tomorrow"       → ["Syllabus"]
-  "when is next exam"           → ["Exam Date"]
-  "day and date of CSE-415 CT"  → ["Exam Day", "Exam Date"]
-  "notes for next exam"         → ["Exam Notes Drive Link"]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+  "next exam info"               → ["*"]
+  "next week updates"            → ["*"]
+  "syllabus for tomorrow"        → ["Syllabus"]
+  "when is next exam"            → ["Exam Date"]
+  "next CSE-401 exam"            → ["*"]
+  "class test 2 of HCI syllabus" → ["Syllabus"]
+  "notes for next exam"          → ["Exam Notes Drive Link"]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
     response = client.chat.completions.create(
         model=_require_model(),
-        max_tokens=150,
+        max_tokens=400,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_message}
@@ -170,38 +160,21 @@ Examples:
     if content is None:
         raise RuntimeError("OpenAI returned an empty response")
 
-    result = json.loads(content.strip())
-
-    # Python fills matched_values based on date_mode — LLM never does this
-    if result.get("date_mode") == "exact" and result.get("date_target"):
-        result["matched_values"] = _match_dates_from_db(result["date_target"], parsed_values)
-
-    elif result.get("date_mode") == "nearest" and result.get("date_target"):
-        result["matched_values"] = _find_nearest_date(parsed_values, result["date_target"])
-
-    elif result.get("date_mode") == "range" and result.get("range"):
-        from_date = result["range"]["from"]
-        to_date   = result["range"]["to"]
-        result["matched_values"] = [
-            v for v in parsed_values
-            if from_date <= v[:10] <= to_date
-        ]
-
-    return result
+    return json.loads(content.strip())
 
 
 if __name__ == "__main__":
     import asyncio
     import argparse
 
-    parser = argparse.ArgumentParser(description="Match a message to DB values and return columns.")
-    parser.add_argument("message",       help="User message to analyze")
-    parser.add_argument("filter_column", help="Column used to filter the database")
-    parser.add_argument("db_values",     help="JSON array of available database values")
+    parser = argparse.ArgumentParser(description="Match a multi-column query to DB values.")
+    parser.add_argument("message", help="User message to analyze")
+    parser.add_argument("filter_columns", help="JSON array of filter columns")
+    parser.add_argument("column_values", help="JSON object mapping column -> list of DB values")
     args = parser.parse_args()
 
     print(asyncio.run(match_to_db_value(
         args.message,
-        args.filter_column,
-        args.db_values
+        json.loads(args.filter_columns),
+        json.loads(args.column_values),
     )))

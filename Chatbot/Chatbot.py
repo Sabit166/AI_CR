@@ -1,7 +1,6 @@
 import sys
 import argparse
 import asyncio
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,78 +9,74 @@ if str(ROOT) not in sys.path:
 
 from .Classify_Query import classify_query
 from .Fetch_Column_Values import fetch_column_values
-from .Identify_Filter_Column import identify_filter_column
-from .Is_relevant import is_relevant
 from .Match_to_DB_Value import match_to_db_value
-from .Execute_Exact_Query import execute_exact_query, execute_range_query
-from .Generate_Answer import generate_answer
+from .Execute_Combined_Query import execute_combined_query
 from .Extract_Json_Response import extract_json_response
 
 
-async def chat(req) -> str:
-    print(f"[chat] input: {req}")
-    
-    # Step 1: Classify user query → relevant or not + filter column
+async def chat(req: str) -> str:
+
+    # Step 1: Classify → relevant + ALL filter columns involved
     result = await classify_query(req)
-    print(f"[chat] classify_query result: {result}")
-    # → {"relevant": True, "filter_columns": ["Course Code"]}
+    print(f"\n[Step 1 - Classify Query]\n{result}")
 
     if not result["relevant"]:
         return extract_json_response({"reply": "I can only answer questions about your exam topics."})
-    
-    # Step 2: Fetch all distinct values of that column
-    filter_column = result["filter_column"]  # only one column is returned
-    db_values = await fetch_column_values(filter_column)  # no LLM, pure Supabase
-    print(f"[chat] filter_column: {filter_column}")
-    print(f"[chat] db_values: {db_values}")
-    
-    if not db_values:
-        return extract_json_response({"reply": "The database seems empty right now."})
-    
-    # Step 3: Match user input → exact DB value + return columns
-    match = await match_to_db_value(req, filter_column, db_values)
-    print(f"[chat] match_to_db_value result: {match}")
 
-    matched_values = match.get("matched_values") or []
-    matched_range = match.get("matched_range")
+    filter_columns = result["filter_columns"]
+    if not filter_columns:
+        return extract_json_response({"reply": "Could you be more specific about your question?"})
+
+    # Step 2: Fetch distinct DB values for every NON-DATE filter column
+    column_values: dict[str, list[str]] = {}
+    for column in filter_columns:
+        if column == "Exam Date":
+            continue
+        values = await fetch_column_values(column)
+        if values:
+            column_values[column] = values
+    print(f"\n[Step 2 - Fetch Column Values]\n{column_values}")
+
+    # Step 3: ONE LLM call resolves every column together
+    match = await match_to_db_value(req, filter_columns, column_values)
+    print(f"\n[Step 3 - Match to DB Value]\n{match}")
+
+    column_matches = match.get("column_matches") or {}
+    date_filter = match.get("date_filter") or {}
     return_columns = match.get("return_columns") or ["*"]
-    print(f"[chat] matched_values: {matched_values}")
-    print(f"[chat] matched_range: {matched_range}")
-    print(f"[chat] return_columns: {return_columns}")
 
-    if not matched_values and not matched_range:
-        return extract_json_response({"reply": "I couldn't find a match. Could you be more specific?"})
+    # Unresolved filter check
+    unresolved = []
+    for column in filter_columns:
+        if column == "Exam Date":
+            if not date_filter.get("mode"):
+                unresolved.append("date")
+        elif not column_matches.get(column):
+            unresolved.append(column)
 
-    # Step 4: Exact Supabase query (no LLM)
-    if matched_range:
-        rows = await execute_range_query(
-            filter_column,
-            matched_range,
-            return_columns,
+    if unresolved:
+        return extract_json_response(
+            {"reply": f"I couldn't match what you meant by {', '.join(unresolved)}. Could you double check it?"}
         )
-    else:
-        rows = []
-        seen_rows: set[str] = set()
-        for matched_value in matched_values:
-            for row in await execute_exact_query(filter_column, matched_value, return_columns):
-                row_key = json.dumps(row, sort_keys=True, default=str)
-                if row_key not in seen_rows:
-                    seen_rows.add(row_key)
-                    rows.append(row)
-    print(f"[chat] final rows: {rows}")
-    
+
+    # Step 4: ONE combined query
+    rows = await execute_combined_query(column_matches, date_filter, return_columns)
+    print(f"\n[Step 4 - Execute Combined Query]\n{rows}")
+
     if not rows:
         return extract_json_response({"reply": "No exam records found for that."})
-    
+
     # Step 5: Natural language answer
-    #answer = await generate_answer(req.message, rows)
-    return extract_json_response({"reply": rows})
+    final = extract_json_response({"reply": rows})
+    print(f"\n[Step 5 - Final Answer]\n{final}")
+    return final
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Check whether a message is relevant to the exam chatbot.")
+    parser = argparse.ArgumentParser(description="Chat with the exam bot.")
     parser.add_argument("message", help="User message to evaluate")
     args = parser.parse_args()
-    
+
     print(asyncio.run(chat(args.message)))
 
 

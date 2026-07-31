@@ -34,8 +34,20 @@ def fetch_all_exams() -> list[dict]:
 
 def fetch_exams(
     select_columns: list[str] | None = None,
-    filters: dict[str, str | tuple[str, str]] | None = None,
+    filters: dict[str, dict] | None = None,
+    order: str | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
+    """
+    Generalized Exams fetch. `filters` maps a column name to a spec dict:
+      {"op": "eq",    "value": "CSE-415"}                          -> column=eq.CSE-415
+      {"op": "in",    "values": ["CSE-415", "CSE-401"]}            -> column=in.(CSE-415,CSE-401)
+      {"op": "range", "from": "...", "to": "..."}                  -> column=gte.from & column=lte.to
+      {"op": "gte",   "value": "..."}                              -> column=gte.value
+      {"op": "lte",   "value": "..."}                              -> column=lte.value
+
+    Multiple columns in `filters` are combined with AND automatically (PostgREST default).
+    """
     supabase_url = _load_env_value('SUPABASE_URL')
     supabase_api_key = _load_env_value('SUPABASE_API_KEY')
 
@@ -45,16 +57,31 @@ def fetch_exams(
     query_params: list[tuple[str, str]] = [
         ('select', '*' if not select_columns else ','.join(select_columns)),
     ]
-    if filters:
-        for key, value in filters.items():
-            if isinstance(value, tuple):
-                start_value, end_value = value
-                query_params.append((key, f'gte.{start_value}'))
-                query_params.append((key, f'lte.{end_value}'))
-            else:
-                query_params.append((key, f'eq.{value}'))
 
-    endpoint = f"{supabase_url.rstrip('/')}/Exams?{urlencode(query_params, quote_via=quote, safe=',*')}"
+    if filters:
+        for column, spec in filters.items():
+            op = spec.get('op')
+            if op == 'eq':
+                query_params.append((column, f"eq.{spec['value']}"))
+            elif op == 'in':
+                values = ','.join(spec['values'])
+                query_params.append((column, f"in.({values})"))
+            elif op == 'range':
+                query_params.append((column, f"gte.{spec['from']}"))
+                query_params.append((column, f"lte.{spec['to']}"))
+            elif op == 'gte':
+                query_params.append((column, f"gte.{spec['value']}"))
+            elif op == 'lte':
+                query_params.append((column, f"lte.{spec['value']}"))
+            else:
+                raise RuntimeError(f"Unsupported filter operator: {op!r}")
+
+    if order:
+        query_params.append(('order', order))
+    if limit is not None:
+        query_params.append(('limit', str(limit)))
+
+    endpoint = f"{supabase_url.rstrip('/')}/Exams?{urlencode(query_params, quote_via=quote, safe=',*()')}"
     request = Request(
         endpoint,
         headers={
@@ -84,43 +111,6 @@ def fetch_exam_column_values(column: str) -> list[str]:
     rows = fetch_exams(select_columns=[column])
     values = [row[column] for row in rows if row.get(column) is not None]
     return list(dict.fromkeys(values))
-
-
-def fetch_exam_rows(
-    filter_column: str,
-    matched_value: str,
-    return_columns: list[str],
-) -> list[dict]:
-    if return_columns == ['*']:
-        select_columns = ['*']
-    else:
-        select_columns = list(dict.fromkeys(return_columns + ['Course Title', 'Course Code']))
-
-    return fetch_exams(
-        select_columns=select_columns,
-        filters={filter_column: matched_value},
-    )
-
-
-def fetch_exam_rows_by_range(
-    filter_column: str,
-    date_range: dict[str, str],
-    return_columns: list[str],
-) -> list[dict]:
-    if return_columns == ['*']:
-        select_columns = ['*']
-    else:
-        select_columns = list(dict.fromkeys(return_columns + ['Course Title', 'Course Code']))
-
-    start_value = date_range.get('from')
-    end_value = date_range.get('to')
-    if not start_value or not end_value:
-        raise RuntimeError('matched_range must include from and to values')
-
-    return fetch_exams(
-        select_columns=select_columns,
-        filters={filter_column: (start_value, end_value)},
-    )
 
 
 def create_exam(payload: dict) -> dict:
