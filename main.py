@@ -27,6 +27,7 @@ app.add_middleware(
 
 VERIFY_TOKEN = "exam_bot_verify_2026"
 PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+PROCESSED_MESSAGE_IDS: set[str] = set()
 
 
 def _send_page_message(recipient_id: str, text: str) -> None:
@@ -72,10 +73,16 @@ async def webhook(request: Request):
         for event in entry.get("messaging", []):
             sender = event.get("sender", {})
             message = event.get("message", {})
+            message_id = message.get("mid")
+
+            if message_id and message_id in PROCESSED_MESSAGE_IDS:
+                continue
 
             if sender.get("id") and message and not message.get("is_echo"):
                 user_message = message.get("text")
                 if user_message:
+                    if message_id:
+                        PROCESSED_MESSAGE_IDS.add(message_id)
                     reply = await chat(user_message)
                     _send_page_message(sender["id"], reply)
 

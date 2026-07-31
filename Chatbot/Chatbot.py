@@ -19,9 +19,11 @@ from .Extract_Json_Response import extract_json_response
 
 
 async def chat(req) -> str:
+    print(f"[chat] input: {req}")
     
     # Step 1: Classify user query → relevant or not + filter column
     result = await classify_query(req)
+    print(f"[chat] classify_query result: {result}")
     # → {"relevant": True, "filter_columns": ["Course Code"]}
 
     if not result["relevant"]:
@@ -30,16 +32,22 @@ async def chat(req) -> str:
     # Step 2: Fetch all distinct values of that column
     filter_column = result["filter_column"]  # only one column is returned
     db_values = await fetch_column_values(filter_column)  # no LLM, pure Supabase
+    print(f"[chat] filter_column: {filter_column}")
+    print(f"[chat] db_values: {db_values}")
     
     if not db_values:
         return extract_json_response({"reply": "The database seems empty right now."})
     
     # Step 3: Match user input → exact DB value + return columns
     match = await match_to_db_value(req, filter_column, db_values)
+    print(f"[chat] match_to_db_value result: {match}")
 
     matched_values = match.get("matched_values") or []
     matched_range = match.get("matched_range")
     return_columns = match.get("return_columns") or ["*"]
+    print(f"[chat] matched_values: {matched_values}")
+    print(f"[chat] matched_range: {matched_range}")
+    print(f"[chat] return_columns: {return_columns}")
 
     if not matched_values and not matched_range:
         return extract_json_response({"reply": "I couldn't find a match. Could you be more specific?"})
@@ -60,6 +68,7 @@ async def chat(req) -> str:
                 if row_key not in seen_rows:
                     seen_rows.add(row_key)
                     rows.append(row)
+    print(f"[chat] final rows: {rows}")
     
     if not rows:
         return extract_json_response({"reply": "No exam records found for that."})
