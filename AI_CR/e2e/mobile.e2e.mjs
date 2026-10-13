@@ -71,7 +71,7 @@ async function fakeSupabaseAuth(page) {
 }
 
 async function signIn(page, email = 'cr@e2e.test', password = 'correct-password') {
-  await page.goto(APP)
+  await page.goto(`${APP}/cr/`)
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
@@ -99,7 +99,7 @@ async function noHorizontalOverflow(page) {
 async function smallTouchTargets(page) {
   return page.evaluate(() => {
     const bad = []
-    const selector = 'button, input:not([type=checkbox]):not([type=radio]), textarea, summary, .chip, .check'
+    const selector = 'button, a.btn, select, input:not([type=checkbox]):not([type=radio]), textarea, summary, .chip, .check'
     for (const el of document.querySelectorAll(selector)) {
       const r = el.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) continue
@@ -270,6 +270,36 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
     await page.locator('.exam-card', { hasText: `${prefix}-416` }).getByText(/2:30/).waitFor()
   })
 
+  await step('student board shows the exam read-only, without signing in', async () => {
+    const studentContext = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true })
+    const student = await studentContext.newPage()
+    const requests = []
+    student.on('request', (request) => requests.push(new URL(request.url()).pathname))
+    await student.goto(APP)
+    await student.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor({ timeout: 5000 })
+    const card = student.locator('.exam-card', { hasText: `${prefix}-416` })
+    await card.waitFor()
+    await card.getByText('Experiment 1').waitFor()
+    await card.getByText(/2:30/).waitFor()
+    assert.equal(await student.getByRole('button', { name: /Edit|Delete|New exam|Sign out/ }).count(), 0)
+    assert.equal(await student.locator('input, textarea').count(), 0)
+    assert.equal(await student.getByLabel('Email').count(), 0)
+    const href = await student.getByRole('link', { name: /Ask on Messenger/ }).first().getAttribute('href')
+    assert.match(href, /^https:\/\/m\.me\//)
+
+    await student.getByLabel('Course').selectOption(await student.locator('option', { hasText: `${prefix}-415` }).getAttribute('value'))
+    await student.getByText('No upcoming exams posted').waitFor()
+    await student.getByLabel('Course').selectOption(await student.locator('option', { hasText: `${prefix}-416` }).getAttribute('value'))
+    await student.locator('.exam-card', { hasText: `${prefix}-416` }).waitFor()
+
+    const api = requests.filter((path) => path.startsWith('/api/') || path.startsWith('/auth/'))
+    assert.ok(api.length > 0 && api.every((path) => path.startsWith('/api/public/')), `unexpected calls: ${api}`)
+    await noHorizontalOverflow(student)
+    assert.deepEqual(await smallTouchTargets(student), [], 'small touch targets')
+    await student.screenshot({ path: `${SHOTS}/07-student-board-360.png`, fullPage: true })
+    await studentContext.close()
+  })
+
   await step('removing a course with exams explains it will be archived', async () => {
     await nav(page, 'Courses').click()
     await page.locator('.course-card', { hasText: `${prefix}-416` }).getByRole('button', { name: 'Remove' }).click()
@@ -337,6 +367,24 @@ for (const vp of VIEWPORTS) {
     await page.screenshot({ path: `${SHOTS}/layout-${vp.name}-exam-form.png`, fullPage: true })
   })
   await context.close()
+}
+
+// ---------------------------------------------------------------- student board at every viewport
+for (const vp of VIEWPORTS) {
+  await step(`${vp.name} ${vp.width}px student board: no horizontal overflow${vp.isMobile ? ', touch targets >= 44px' : ''}`, async () => {
+    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.isMobile, hasTouch: vp.isMobile })
+    const page = await context.newPage()
+    await page.goto(APP)
+    await page.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor({ timeout: 5000 })
+    await page.getByRole('tab', { name: 'Past' }).click()
+    await page.getByRole('heading', { name: 'Past exams', level: 1 }).waitFor()
+    await page.getByRole('tab', { name: 'Upcoming' }).click()
+    await page.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor()
+    await noHorizontalOverflow(page)
+    if (vp.isMobile) assert.deepEqual(await smallTouchTargets(page), [], 'small touch targets')
+    await page.screenshot({ path: `${SHOTS}/layout-${vp.name}-student.png`, fullPage: true })
+    await context.close()
+  })
 }
 
 await browser.close()

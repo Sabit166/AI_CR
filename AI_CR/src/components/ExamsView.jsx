@@ -1,34 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import ExamForm from './ExamForm.jsx'
+import { formatDay, formatTime, groupByDay } from '../lib/format.js'
 import { Banner, ConfirmDialog, EmptyState, LoadingBlock, Spinner } from './ui.jsx'
 
 const PAGE_SIZE = 20
-
-function formatDay(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-function formatTime(value) {
-  if (!value) return null
-  const [h, m] = value.split(':').map(Number)
-  return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
-
-function groupByDay(exams) {
-  const groups = []
-  for (const exam of exams) {
-    const last = groups.at(-1)
-    if (last && last.day === exam.exam_date) last.items.push(exam)
-    else groups.push({ day: exam.exam_date, items: [exam] })
-  }
-  return groups
-}
 
 export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) {
   const [scope, setScope] = useState('upcoming')

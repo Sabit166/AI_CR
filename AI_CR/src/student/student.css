@@ -1,0 +1,70 @@
+/* Student board: read-only, no bottom tab bar. */
+.student-main { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+
+.app-header .btn-ghost[href] { text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
+
+.student-hero { display: flex; flex-direction: column; gap: 6px; }
+
+.student-controls { display: flex; flex-direction: column; gap: 10px; }
+
+.student-filter select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-h);
+  font: inherit;
+}
+
+.student-filter select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.week-group { display: flex; flex-direction: column; gap: 12px; }
+
+.week-title {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-strong);
+  padding-top: 8px;
+  border-bottom: 2px solid var(--accent-bg);
+  padding-bottom: 6px;
+}
+
+.student-exam { border-left: 4px solid var(--accent); }
+
+.student-syllabus {
+  background: var(--accent-bg);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.student-label { font-size: 0.8125rem; font-weight: 700; color: var(--accent-strong); }
+.student-syllabus-text { white-space: pre-line; overflow-wrap: anywhere; color: var(--text-h); }
+
+.student-link { font-weight: 600; color: var(--accent-strong); align-self: flex-start; }
+
+.badge-soon { background: #eff8ff; color: #175cd3; }
+
+.student-footer {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+}
+
+.student-footer a { color: var(--accent-strong); font-weight: 600; }
+
+@media (min-width: 768px) {
+  .student-controls { flex-direction: row; align-items: center; }
+  .student-controls .segmented { flex: none; min-width: 260px; }
+  .student-filter { flex: 1; }
+}
+
+@media (max-width: 380px) {
+  .app-header .btn-ghost[href] { padding: 0 10px; font-size: 0.875rem; }
+}

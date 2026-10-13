@@ -17,6 +17,7 @@ load_dotenv()
 
 from Chatbot.Chatbot import answer  # noqa: E402  (needs env loaded first)
 from cr_api import router as cr_router  # noqa: E402
+from public_api import router as public_router  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 logger = logging.getLogger('aicr.webhook')
@@ -34,6 +35,7 @@ app.add_middleware(
     allow_headers=['Authorization', 'Content-Type'],
 )
 app.include_router(cr_router)
+app.include_router(public_router)
 
 # Run project: d:\AI_CR\env\Scripts\uvicorn.exe main:app --host 127.0.0.1 --port 8001
 

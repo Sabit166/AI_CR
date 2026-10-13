@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 import academic
 import date_ranges as dr
 import db_fetch
+import public_api
 from auth import CRUser, require_cr
 from Chatbot import formatter
 from Chatbot.catalog import catalog_cache
@@ -41,6 +42,12 @@ def _db_error(error: db_fetch.DatabaseError) -> HTTPException:
         return _fail(500 if error.code != 'database_error' else 502, 'The database request failed. Nothing was saved.')
     status = _STATUS_FOR_CODE.get(error.code, 422)
     return _fail(status, str(error), code=error.code)
+
+
+def _data_changed() -> None:
+    """Drop cached copies so students (bot and public board) see the change at once."""
+    catalog_cache.invalidate()
+    public_api.invalidate()
 
 
 def _clean_text(value: str | None, max_len: int) -> str | None:
@@ -110,7 +117,7 @@ def create_faculty(body: FacultyIn, user: CR) -> dict:
         if error.code == 'duplicate':
             raise _fail(409, f'"{body.name}" is already in the faculty list.', 'name') from error
         raise _db_error(error) from error
-    catalog_cache.invalidate()
+    _data_changed()
     return row
 
 
@@ -122,7 +129,7 @@ def rename_faculty(faculty_id: int, body: FacultyIn, user: CR) -> dict:
         if error.code == 'duplicate':
             raise _fail(409, f'"{body.name}" is already in the faculty list.', 'name') from error
         raise _db_error(error) from error
-    catalog_cache.invalidate()
+    _data_changed()
     return row
 
 
@@ -132,7 +139,7 @@ def remove_faculty(faculty_id: int, user: CR) -> dict:
         outcome = db_fetch.remove_faculty(faculty_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
-    catalog_cache.invalidate()
+    _data_changed()
     return {'result': outcome}
 
 
@@ -203,7 +210,7 @@ def _save_course(course_id: int | None, body: CourseIn) -> dict:
             raise _fail(422, str(error), 'faculty_ids') from error
         raise _db_error(error) from error
     finally:
-        catalog_cache.invalidate()
+        _data_changed()
     return course
 
 
@@ -224,7 +231,7 @@ def remove_course(course_id: int, user: CR) -> dict:
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
     finally:
-        catalog_cache.invalidate()
+        _data_changed()
     return {'result': outcome}
 
 
@@ -320,6 +327,7 @@ def _save_exam(exam_id: int | None, body: ExamIn, user: CRUser) -> dict:
             client_request_id=str(body.client_request_id) if body.client_request_id and exam_id is None else None,
             user_id=user.id,
         )
+        public_api.invalidate()
         row = db_fetch.get_exam(saved_id)
     except db_fetch.DatabaseError as error:
         if error.code == 'duplicate':
@@ -385,6 +393,8 @@ def delete_exam(exam_id: int, user: CR) -> dict:
         deleted = db_fetch.delete_exam(exam_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
+    finally:
+        public_api.invalidate()
     if not deleted:
         raise _fail(404, 'Exam record not found (it may already have been deleted).')
     return {'result': 'deleted'}

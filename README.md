@@ -1,152 +1,241 @@
-# AI CR
+<div align="center">
 
-Class-representative assistant: a CR dashboard for configuring courses and posting exam
-information, and a Facebook Messenger bot that answers students' exam questions from the
-same Supabase data.
+# 🎓 AI CR
 
-## Deployment
+### Your class representative's assistant — exam dates, syllabus and updates, one message away
 
-- FastAPI backend + Messenger webhook (Render): https://ai-cr.onrender.com/
-- CR dashboard (Vercel): https://ai-e4mnoglc3-sabit166s-projects.vercel.app/
+*Ask on Messenger. Get the answer straight from what your CR posted.*
 
-## Architecture
+[**💬 Ask on Messenger**](https://m.me/61592083183113) &nbsp;·&nbsp; [**🗓️ Open the exam board**](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/)
 
-```
-CR dashboard (React, AI_CR/) ──Supabase Auth token──► FastAPI /api/* (cr_api.py)
-                                                         │  checks token + cr_members allowlist
-                                                         ▼
-Messenger ──► POST /webhook (main.py) ──► Chatbot.answer ──► Supabase (PostgREST, secret key)
-                                            1 LLM call         courses · faculty · exams
-                                            (intent only)      exam_details view · RPCs
-```
+</div>
 
-### Data model (`supabase/migrations/`)
+---
 
-| Object | Purpose |
+## 📖 Contents
+
+- [What is AI CR?](#-what-is-ai-cr)
+- [For students](#-for-students)
+- [For class representatives](#-for-class-representatives)
+- [How the week works](#-how-the-week-works)
+- [Frequently asked questions](#-frequently-asked-questions)
+
+---
+
+## 🏛️ What is AI CR?
+
+Every term, the same questions fill the class group:
+*"When is the next CT?"* · *"What's the syllabus?"* · *"Which exams are next week?"*
+
+**AI CR** answers them for you. Your class representative posts each exam once, and the
+assistant on our class **Facebook Page** replies to everyone, any time of day, with
+exactly what was posted — no guessing, no outdated screenshots.
+
+| | |
 |---|---|
-| `courses` | Code, title, aliases. `course_type` is a generated column from the code (odd = Theoretical, even = Sessional). Active = `archived_at is null`; one active row per code. |
-| `faculty`, `course_faculty` | One faculty directory, many-to-many with courses. |
-| `exam_types` | The single list of allowed exam types per course type (CT 1–3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). `Mid` is kept only for imported legacy rows. |
-| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; optional section (NULL = whole class), syllabus, venue, remarks, notes link. |
-| `exam_details` (view) | Read model used by the bot and dashboard. |
-| `cr_save_course`, `cr_save_exam`, `cr_remove_course`, `cr_remove_faculty` | Transactional write RPCs; validation is repeated in triggers. |
-| `cr_members` | Supabase Auth users allowed to use the dashboard. |
+| 💬 **Students** | [Ask on Messenger](https://m.me/61592083183113) in your own words, or browse the [exam board](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/). |
+| 🗂️ **Class representatives** | Keep the term's courses, teachers and exams up to date from your phone. |
 
-The original flat `"Exams"` table is left untouched; its rows were copied into the new tables.
+---
 
-### Business rules
+## 🎒 For students
 
-- **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`), with shared test vectors.
-- **Faculty per course**: Theoretical 2, Sessional 3–4. A different count needs a short exception note (stored as `faculty_exception_note`).
-- **Exam types** must match the course type — enforced by the API and by a database trigger.
-- **Removing a course** that has exams archives it (history kept); a course without exams is deleted.
-- **Duplicate saves**: the exam form sends a `client_request_id`; retries return the same row. A second exam with the same course, type, date and section is rejected.
+There are two ways to check your exams — no account needed for either.
 
-### Student agent (`Chatbot/`)
+### 🗓️ The exam board
 
-1. Load the course catalog from Supabase (cached ≤ `CATALOG_TTL_SECONDS`, default 60 s; cleared instantly after any CR write).
-2. **One** structured-output LLM call extracts intent: verbatim course/teacher mentions, exam types, kind of time range, requested fields. The prompt contains no course, teacher or date data.
-3. Unambiguous time phrases ("next week", "this week", "tomorrow", explicit dates, "Sunday to Thursday") are detected by rules and override the LLM.
-4. Mentions are resolved deterministically: code → exact title/alias → acronym → department prefix → word match → fuzzy. Several plausible courses → the bot asks which one (an exam type can settle it: "Database CT" can only be the theory course).
-5. Dates are computed in Python for Asia/Dhaka, then **one** filtered, sorted `exam_details` query runs.
-6. The reply is formatted from the rows (nothing generated), split at record boundaries under Messenger's 2000-character limit.
+**🔗 [https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/)**
 
-If the LLM is unavailable a rule-based parser takes over. Database failures are reported as such, never as "no exams".
+A simple page listing every upcoming exam, grouped into **This week**, **Next week** and **Later**:
 
-**Weeks**: the academic week is Sunday–Thursday. "This week" = today → Thursday (on Friday/Saturday the bot says the week is over and shows next week). "Next week" = the following Sunday–Thursday. Today is always taken in Asia/Dhaka.
+- each exam's **course, type, date, time, section and syllabus**
+- **Today**, **Tomorrow** and **In 3 days** labels so nothing sneaks up on you
+- a **course filter** to see only one subject
+- a **Past** tab for exams that are already done
 
-## Local development
+The board is read-only — you can look, but only CRs can change anything.
 
-```bash
-# Backend (Python 3.13)
-python -m venv env && env/Scripts/pip install -r requirements-dev.txt   # env/bin/pip on macOS/Linux
-cp .env.example .env            # fill in values
-env/Scripts/uvicorn main:app --host 127.0.0.1 --port 8001
+> 📱 **Tip:** add it to your phone's home screen (browser menu → **Add to Home Screen**) and it opens like an app.
 
-# Ask the bot from the terminal
-env/Scripts/python -m Chatbot.Chatbot "what exams do we have next week?"
+### 💬 Ask on Messenger
 
-# Dashboard
-cd AI_CR && npm install
-cp .env.example .env.local      # fill in values
-npm run dev
-```
+**🔗 [https://m.me/61592083183113](https://m.me/61592083183113)**
 
-## Tests
+Message our class **Facebook Page** and type your question — in plain English, the way you'd ask a classmate.
 
-```bash
-# Unit + API tests (no network)
-env/Scripts/python -m pytest
+### Questions you can ask
 
-# Integration tests: real migrations in an isolated Postgres + PostgREST (Docker)
-docker compose -f tests/db/docker-compose.yml up -d --wait
-env/Scripts/python -m pytest tests/integration
-docker compose -f tests/db/docker-compose.yml down -v
-
-# Frontend
-cd AI_CR && npm run lint && npm test && npm run build
-
-# Mobile UI end-to-end (needs the Docker stack above and Google Chrome)
-env/Scripts/python tests/e2e/server.py                 # repo root, port 8011
-cd AI_CR && npm run e2e:build && npm run e2e:preview    # port 4179
-cd AI_CR && npm run e2e
-```
-
-Tests never touch Supabase: `tests/conftest.py` pins harmless connection settings.
-
-## Applying the database migration
-
-**Status:** both migrations were applied to the live project on 2026-10-13 (versions match the
-file names in `supabase/migrations/`). All 6 legacy rows were copied. The steps below are for
-a fresh project or for reference; step 5 (CR account) still has to be done once.
-
-`supabase/migrations/20261013031917_dynamic_course_config.sql` is the real change;
-`20261013031653_legacy_exams_baseline.sql` only documents the existing table (a no-op on the live database).
-
-1. Back up: Supabase dashboard → Database → Backups, or export the `Exams` table as CSV.
-2. Run the migration in the SQL editor, or with the CLI: `supabase db push`.
-3. Read the NOTICE output: any legacy rows that could not be copied are listed by id and stay in `"Exams"`.
-4. Check: `select * from exam_details order by exam_date;`
-5. Create the CR account: Authentication → Users → **Add user** (email + password). Then:
-   ```sql
-   insert into public.cr_members (user_id, note)
-   select id, 'Class representative' from auth.users where email = 'cr@example.com';
-   ```
-6. Recommended: Authentication → Providers → Email → turn off **Allow new users to sign up**. (Even if someone signs up, they are not in `cr_members` and get 403.)
-
-The legacy teacher names are kept per exam (`legacy_teacher`) but not turned into faculty records, because variants such as "Major Nazmul" / "Maj Nazmul Hasan" can't be merged safely. Add faculty and assign them to courses in the dashboard.
-
-### Rollback
-
-- **Application**: redeploy the previous commit on Render/Vercel. The old code only uses the untouched `"Exams"` table.
-- **Database**: `supabase/rollback/20261013031917_dynamic_course_config_down.sql` drops the new objects. Exams created after the migration exist only in `public.exams`; export them first.
-
-## Deploying
-
-**Order**: migration → backend (Render) → dashboard (Vercel).
-
-Render (`main.py`; build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`) — unchanged commands. Environment:
-
-| Variable | Required | Notes |
-|---|---|---|
-| `SUPABASE_URL` | yes | `https://<ref>.supabase.co/rest/v1` (as before) |
-| `SUPABASE_API_KEY` | yes | Supabase **secret** key. Server only. |
-| `OPENAI_API_KEY`, `MODEL` | yes | As before. Without them the rule-based parser is used. |
-| `PAGE_ACCESS_TOKEN` | yes | As before. |
-| `MESSENGER_APP_SECRET` | recommended | Facebook App Secret. When set, webhook calls must carry a valid `X-Hub-Signature-256`. |
-| `MESSENGER_VERIFY_TOKEN` | optional | Defaults to the previous hard-coded token. |
-| `CORS_ALLOW_ORIGINS` | recommended | Comma-separated dashboard origins. Unset = `*` (auth uses bearer tokens, not cookies). |
-| `CORS_ALLOW_ORIGIN_REGEX` | optional | e.g. `https://ai-.*-sabit166s-projects\.vercel\.app` for Vercel previews. |
-| `CATALOG_TTL_SECONDS` | optional | Default 60. |
-
-Vercel (`AI_CR/`):
-
-| Variable | Notes |
+| You want to know… | Try asking |
 |---|---|
-| `VITE_API_BASE_URL` | `https://ai-cr.onrender.com` |
-| `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Publishable (anon) key — safe in the browser; it grants no table access. Never put the secret key here. |
+| 🗓️ This week's exams | *"What exams do we have this week?"* · *"What's left this week?"* |
+| 📅 Next week's exams | *"What exams are scheduled next week?"* · *"Next week's updates"* |
+| ⏭️ The next exam | *"When is the next exam?"* · *"Next CT of CSE-415?"* |
+| 📖 A syllabus | *"Syllabus of the next Database CT"* · *"What's in HCI CT 2?"* |
+| ☀️ A particular day | *"Anything tomorrow?"* · *"Exams on Monday"* · *"What's on 27 October?"* |
+| 👩‍🏫 A teacher's exams | *"Next exam of Nafisa madam"* |
+| 🧑‍🤝‍🧑 Your section | *"Next week's exams for section A"* |
+| 📚 A whole course | *"All upcoming exams of CSE-464"* |
 
-### Removed
+### Ways to name a course
 
-The unauthenticated `GET/POST/PATCH/DELETE /exams` endpoints are gone (anyone could edit or delete exams). The dashboard now uses the authenticated `/api/*` routes.
+You don't need the exact title. Any of these work:
+
+- **Course code** — `CSE-415`, `cse 415`, `CSE415`, or just `415`
+- **Full title** — *Human Computer Interface*
+- **Short name** — *HCI*, *SDP 2*, *DBMS*
+- **A subject word** — *"the database exam"*
+
+If your words could mean more than one course, the assistant will ask which one you mean — just reply with the course code.
+
+### What you'll get
+
+```
+📘 CSE-415 · Human Computer Interface
+📝 CT 2 · Section A
+🗓 Monday, 3 August 2026 · 8:00 AM
+📖 Syllabus:
+Chapter 2 (full)
+Chapter 3 up to 3.4
+👤 Faculty: …
+```
+
+Everything in a reply comes from what your CR posted. If something hasn't been posted yet, the assistant says so plainly — it never makes up a date or a syllabus.
+
+> 💡 **Tip:** If a date or syllabus looks wrong, tell your CR — once they fix it, every answer updates immediately.
+
+---
+
+## 🧑‍💼 For class representatives
+
+### Your dashboard
+
+Open the CR dashboard on your phone or laptop:
+
+**🔗 [https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/cr/](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/cr/)**
+
+Sign in with the email and password set up for you. Only approved class representatives can sign in. (Students use the read-only [exam board](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/) instead — it has a small **CR sign-in** link at the bottom.)
+
+> 📱 Tip: on your phone, use your browser's **Add to Home Screen** to open it like an app.
+
+The dashboard has three tabs at the bottom of the screen:
+
+| Tab | What it's for |
+|---|---|
+| 🗓 **Exams** | Post, edit and delete exam updates |
+| 📘 **Courses** | This term's courses and who teaches them |
+| 👤 **Faculty** | The list of teachers |
+
+### ✅ Start of term — a one-time setup
+
+1. **Faculty** → add each teacher's full name.
+2. **Courses** → **+ Add course** for every course this term:
+   - Type the **course code** (e.g. `CSE-415`). The type is filled in for you:
+     **odd numbers are Theoretical, even numbers are Sessional.**
+   - Enter the **course title**.
+   - Add any **short names** students use (e.g. *HCI*, *DBMS*) so the assistant recognises them.
+   - Tick the **teachers**: usually **2** for a Theoretical course and **3–4** for a Sessional course.
+     If yours is different, add a short note explaining why.
+3. Remove last term's courses with **Remove**. Their old exam records are kept.
+
+### ✍️ Posting an exam
+
+1. Go to **Exams** → **+ New exam**.
+2. Tap the **course**. The title appears automatically.
+3. Choose the **exam type**. Only the right options appear:
+
+   | Theoretical courses | Sessional courses |
+   |---|---|
+   | CT 1 · CT 2 · CT 3 | Project Update · Evaluation · Online Exam · Project Presentation · Lab Test |
+
+4. Pick the **date**, and the **time** if you know it.
+5. Enter the **section**, or leave it empty if the exam is for the whole class.
+6. Tick the **teacher(s)** taking it (optional).
+7. Write the **syllabus**. Line breaks are kept exactly as you type them.
+8. Optionally open **More details** for venue, a notes link, or remarks.
+9. Tap **Preview** to see exactly what students will receive, then **Save exam**.
+
+Students can ask about it — and see it on the exam board — the moment you save.
+
+### 🔁 Making changes
+
+- **Edit anything at any time.** Tap **Edit** on an exam or course, change it, and save. The exam board and Messenger update immediately.
+- **Delete an exam** with **Delete** (you'll be asked to confirm).
+- **Past exams** are under **Exams → Past**.
+- **Removing a course** that already has exams only takes it off this term's list — its exam history is kept.
+
+### 🛟 Good to know
+
+- **Nothing is lost if a save fails.** Your entries stay in the form; just tap Save again.
+- **Closed the page by accident?** Your unfinished exam is restored the next time you tap **+ New exam**.
+- **Tapped Save twice?** Only one exam is created.
+- **Two exams of the same type for the same course on the same day and section** aren't allowed — edit the existing one instead.
+
+---
+
+## 📆 How the week works
+
+Our academic week runs **Sunday to Thursday**, and all dates follow **Bangladesh time**.
+
+| When you ask… | You get… |
+|---|---|
+| *"This week"* | From **today** until **Thursday** |
+| *"This week"* on **Friday or Saturday** | The week is over, so you're shown **next week** instead |
+| *"Next week"* | The **coming Sunday to Thursday** |
+| *"Tomorrow"*, *"Monday"*, *"27 October"* | That exact day |
+| *"Next exam"* | The nearest upcoming exam (all of them, if several are on the same day) |
+
+---
+
+## ❓ Frequently asked questions
+
+<details>
+<summary><b>The assistant says no exam has been posted. Does that mean there's no exam?</b></summary>
+
+It means your CR hasn't posted one for that time yet. When in doubt, check with your CR or teacher.
+</details>
+
+<details>
+<summary><b>Do I need an account to see the exam board?</b></summary>
+
+No. Just open <a href="https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/">the exam board</a>. Only CRs need to sign in.
+</details>
+
+<details>
+<summary><b>The assistant asked me which course I meant.</b></summary>
+
+Your words matched more than one course (for example, a theory course and its lab). Reply with the course code, such as <code>CSE-305</code>.
+</details>
+
+<details>
+<summary><b>It says it couldn't reach the database.</b></summary>
+
+That's a temporary connection problem, not "no exams". Try again in a minute.
+</details>
+
+<details>
+<summary><b>Can students change exam information?</b></summary>
+
+No. Only signed-in class representatives can add or edit anything. Students can view the exam board and ask questions.
+</details>
+
+<details>
+<summary><b>I'm a new CR. How do I get access?</b></summary>
+
+Ask the project maintainer to create your account and approve it as a CR.
+</details>
+
+<details>
+<summary><b>Why is my course marked Theoretical / Sessional?</b></summary>
+
+It's decided by the course number: odd numbers (e.g. 415) are Theoretical and even numbers (e.g. 464) are Sessional.
+</details>
+
+---
+
+<div align="center">
+
+**Made for our class, by our class.** 📚
+
+*For maintainers: setup, deployment and technical details are in the [Developer Guide](docs/DEVELOPER.md).*
+
+</div>
