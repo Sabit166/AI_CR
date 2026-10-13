@@ -1,0 +1,32 @@
+# Isolated test database for integration tests. Never points at Supabase.
+#   docker compose -f tests/db/docker-compose.yml up -d --wait
+#   docker compose -f tests/db/docker-compose.yml down -v
+name: aicr-test
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "55432:5432"
+    volumes:
+      - ./00_supabase_stub.sql:/docker-entrypoint-initdb.d/00_supabase_stub.sql:ro
+      - ../../supabase/migrations/20261013031653_legacy_exams_baseline.sql:/docker-entrypoint-initdb.d/10_baseline.sql:ro
+      - ./20_legacy_seed.sql:/docker-entrypoint-initdb.d/20_legacy_seed.sql:ro
+      - ../../supabase/migrations/20261013031917_dynamic_course_config.sql:/docker-entrypoint-initdb.d/30_dynamic_course_config.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres && psql -U postgres -tAc \"select 1 from pg_tables where tablename='exams'\" | grep -q 1"]
+      interval: 2s
+      retries: 30
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:authenticator@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: aicr-local-test-jwt-secret-0123456789abcdef
+    ports:
+      - "54321:3000"

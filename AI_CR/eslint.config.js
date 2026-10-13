@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'dist-e2e', 'e2e/screenshots']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -17,5 +17,9 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+  },
+  {
+    files: ['e2e/**/*.{js,mjs}', 'tests/**/*.js'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ])

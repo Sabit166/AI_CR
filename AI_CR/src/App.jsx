@@ -1,314 +1,206 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
+import { api, ApiError } from './lib/api.js'
+import { supabase, supabaseConfigured } from './lib/supabase.js'
+import LoginScreen from './components/LoginScreen.jsx'
+import ExamsView from './components/ExamsView.jsx'
+import CoursesView from './components/CoursesView.jsx'
+import FacultyView from './components/FacultyView.jsx'
+import { Banner, LoadingBlock, Toasts } from './components/ui.jsx'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001'
-
-const EMPTY_EXAM = {
-  'Course Code': '',
-  'Course Title': '',
-  'Course Teacher': '',
-  'Course Section': '',
-  'Exam Type': '',
-  'Exam Day': '',
-  'Exam Date': '',
-  'Syllabus': '',
-  'Exam Notes Drive Link': '',
-}
-
-const TABLE_COLUMNS = [
-  'id',
-  'Course Code',
-  'Course Title',
-  'Course Teacher',
-  'Course Section',
-  'Exam Type',
-  'Exam Day',
-  'Exam Date',
-  'Syllabus',
-  'Exam Notes Drive Link',
+const TABS = [
+  { id: 'exams', label: 'Exams', icon: '🗓' },
+  { id: 'courses', label: 'Courses', icon: '📘' },
+  { id: 'faculty', label: 'Faculty', icon: '👤' },
 ]
 
-function App() {
-  const [records, setRecords] = useState([])
-  const [newRecord, setNewRecord] = useState(EMPTY_EXAM)
-  const [loading, setLoading] = useState(true)
-  const [savingId, setSavingId] = useState(null)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
+function useToasts() {
+  const [toasts, setToasts] = useState([])
+  const nextId = useRef(1)
+  const dismiss = useCallback((id) => setToasts((current) => current.filter((t) => t.id !== id)), [])
+  const notify = useCallback(
+    (message, kind = 'success') => {
+      const id = nextId.current++
+      setToasts((current) => [...current.slice(-2), { id, message, kind }])
+      setTimeout(() => dismiss(id), kind === 'error' ? 8000 : 4000)
+    },
+    [dismiss],
+  )
+  return { toasts, notify, dismiss }
+}
 
-  const totalRows = useMemo(() => records.length, [records])
+function initialTab() {
+  const hash = window.location.hash.replace('#', '')
+  return TABS.some((tab) => tab.id === hash) ? hash : 'exams'
+}
+
+function App() {
+  const [session, setSession] = useState(undefined) // undefined = still checking
+  const [authState, setAuthState] = useState({ status: 'idle', message: '' })
+  const [tab, setTab] = useState(initialTab)
+  const [data, setData] = useState({ config: null, courses: [], faculty: [] })
+  const [dataState, setDataState] = useState({ loading: true, error: '' })
+  const { toasts, notify, dismiss } = useToasts()
 
   useEffect(() => {
-    loadRecords()
+    if (!supabaseConfigured) return undefined
+    supabase.auth.getSession().then(({ data: result }) => setSession(result.session))
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => listener.subscription.unsubscribe()
   }, [])
 
-  async function loadRecords() {
-    setLoading(true)
-    setError('')
+  const [reloadKey, setReloadKey] = useState(0)
+  const userId = session?.user?.id
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/exams`)
-      if (!response.ok) {
-        throw new Error(`Failed to load records (${response.status})`)
-      }
-      const data = await response.json()
-      setRecords((data.records ?? []).map((record) => ({ ...record })))
-    } catch (fetchError) {
-      setError(fetchError.message)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!userId) return undefined
+    let ignore = false
+    Promise.all([api('/api/config'), api('/api/courses'), api('/api/faculty')]).then(
+      ([config, courses, faculty]) => {
+        if (ignore) return
+        setData({ config, courses: courses.courses, faculty: faculty.faculty })
+        setAuthState({ status: 'ok', message: '' })
+        setDataState({ loading: false, error: '' })
+      },
+      (error) => {
+        if (ignore) return
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          setAuthState({ status: error.status === 403 ? 'forbidden' : 'expired', message: error.message })
+        }
+        setDataState({ loading: false, error: error.message })
+      },
+    )
+    return () => {
+      ignore = true
     }
+  }, [userId, reloadKey])
+
+  const reloadCatalog = useCallback(async () => {
+    try {
+      const [courses, faculty] = await Promise.all([api('/api/courses'), api('/api/faculty')])
+      setData((current) => ({ ...current, courses: courses.courses, faculty: faculty.faculty }))
+    } catch (error) {
+      notify(`Saved, but refreshing the list failed: ${error.message}`, 'error')
+    }
+  }, [notify])
+
+  function selectTab(id) {
+    setTab(id)
+    window.history.replaceState(null, '', `#${id}`)
   }
 
-  function updateExistingRecord(id, field, value) {
-    setRecords((current) =>
-      current.map((record) => (record.id === id ? { ...record, [field]: value } : record)),
+  async function signOut() {
+    await supabase.auth.signOut()
+    setData({ config: null, courses: [], faculty: [] })
+    setAuthState({ status: 'idle', message: '' })
+  }
+
+  if (!supabaseConfigured) {
+    return (
+      <main className="center-screen">
+        <Banner>
+          Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY for the dashboard build.
+        </Banner>
+      </main>
     )
   }
 
-  function updateNewRecord(field, value) {
-    setNewRecord((current) => ({ ...current, [field]: value }))
+  if (session === undefined) {
+    return (
+      <main className="center-screen">
+        <LoadingBlock label="Checking sign-in…" />
+      </main>
+    )
   }
 
-  async function saveRecord(record) {
-    setSavingId(record.id)
-    setMessage('')
-    setError('')
-
-    const payload = {
-      'Course Code': record['Course Code'] ?? '',
-      'Course Title': record['Course Title'] ?? '',
-      'Course Teacher': record['Course Teacher'] ?? '',
-      'Course Section': record['Course Section'] ?? '',
-      'Exam Type': record['Exam Type'] ?? '',
-      'Exam Day': record['Exam Day'] ?? '',
-      'Exam Date': record['Exam Date'] ?? '',
-      Syllabus: record.Syllabus ?? '',
-      'Exam Notes Drive Link': record['Exam Notes Drive Link'] ?? '',
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/exams/${record.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}))
-        throw new Error(errorBody.detail ?? `Failed to update row (${response.status})`)
-      }
-
-      setMessage(`Row ${record.id} updated.`)
-      await loadRecords()
-    } catch (updateError) {
-      setError(updateError.message)
-    } finally {
-      setSavingId(null)
-    }
+  if (!session) {
+    return <LoginScreen />
   }
 
-  async function createRecord(event) {
-    event.preventDefault()
-    setMessage('')
-    setError('')
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/exams`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRecord),
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}))
-        throw new Error(errorBody.detail ?? `Failed to insert row (${response.status})`)
-      }
-
-      setNewRecord(EMPTY_EXAM)
-      setMessage('New row inserted.')
-      await loadRecords()
-    } catch (createError) {
-      setError(createError.message)
-    }
+  if (authState.status === 'forbidden' || authState.status === 'expired') {
+    return (
+      <main className="center-screen">
+        <div className="card narrow">
+          <h1 className="screen-title">{authState.status === 'forbidden' ? 'Not a CR account' : 'Session expired'}</h1>
+          <p>{authState.message}</p>
+          <p className="muted">Signed in as {session.user.email}</p>
+          <button type="button" className="btn btn-primary btn-block" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+      </main>
+    )
   }
 
-  async function deleteRecord(id) {
-    const confirmed = window.confirm(`Delete row ${id}?`)
-    if (!confirmed) {
-      return
-    }
-
-    setSavingId(id)
-    setMessage('')
-    setError('')
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/exams/${id}`, {
-        method: 'DELETE',
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}))
-        throw new Error(errorBody.detail ?? `Failed to delete row (${response.status})`)
-      }
-
-      setMessage(`Row ${id} deleted.`)
-      await loadRecords()
-    } catch (deleteError) {
-      setError(deleteError.message)
-    } finally {
-      setSavingId(null)
-    }
-  }
+  const shared = { data, notify, reloadCatalog }
 
   return (
-    <div className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="brand-lockup">
-          <div className="brand-mark">S</div>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            CR
+          </span>
           <div>
-            <p className="eyebrow">Student dashboard</p>
-            <h1>Exams</h1>
+            <p className="eyebrow">AI CR dashboard</p>
+            <p className="brand-name">Class exam updates</p>
           </div>
         </div>
-
-        <nav className="sidebar-nav">
-          <a href="#overview" className="nav-item active">
-            Overview
-          </a>
-          <a href="#add-row" className="nav-item">
-            Add row
-          </a>
-          <a href="#records" className="nav-item">
-            Records
-          </a>
+        <nav className="tabs-top" aria-label="Sections">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`tab${tab === item.id ? ' tab-active' : ''}`}
+              aria-current={tab === item.id ? 'page' : undefined}
+              onClick={() => selectTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </nav>
+        <button type="button" className="btn btn-ghost btn-small" onClick={signOut}>
+          Sign out
+        </button>
+      </header>
 
-        <div className="sidebar-note">
-          <span>Source table</span>
-          <strong>Supabase Exams</strong>
-          <small>Inline edits, insert, refresh, delete</small>
-        </div>
-      </aside>
-
-      <main className="content-shell">
-        <header className="topbar" id="overview">
-          <div>
-            <p className="eyebrow">Academic records</p>
-            <h2>Manage the full Exams table from one clean screen.</h2>
-            <p className="intro">
-              This layout keeps the table visible like a dashboard: quick stats on top, form on the left, and a wide editable grid below.
-            </p>
-          </div>
-
-          <div className="stats-row">
-            <div className="stat-card">
-              <span>Total rows</span>
-              <strong>{totalRows}</strong>
-            </div>
-            <div className="stat-card alt">
-              <span>Status</span>
-              <strong>{loading ? 'Loading' : 'Ready'}</strong>
-            </div>
-          </div>
-        </header>
-
-        <section className="grid-layout">
-          <section className="panel form-panel" id="add-row">
-            <div className="panel-header compact">
-              <div>
-                <h3>Add row</h3>
-                <p>Insert a new exam record.</p>
-              </div>
-            </div>
-
-            <form className="record-form" onSubmit={createRecord}>
-              {Object.keys(EMPTY_EXAM).map((field) => (
-                <label key={field}>
-                  <span>{field}</span>
-                  <input
-                    type={field === 'Exam Date' ? 'datetime-local' : 'text'}
-                    value={newRecord[field]}
-                    onChange={(event) => updateNewRecord(field, event.target.value)}
-                    placeholder={field}
-                  />
-                </label>
-              ))}
-              <button type="submit" className="primary-button">
-                Insert row
-              </button>
-            </form>
-          </section>
-
-          <section className="panel table-panel" id="records">
-            <div className="panel-header">
-              <div>
-                <h3>Records</h3>
-                <p>Scroll sideways to view every column. Save updates row by row.</p>
-              </div>
-              <button type="button" className="secondary-button" onClick={loadRecords}>
-                Refresh
-              </button>
-            </div>
-
-            {message ? <p className="status success">{message}</p> : null}
-            {error ? <p className="status error">{error}</p> : null}
-            {loading ? <p className="status muted">Loading records...</p> : null}
-
-            {!loading ? (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      {TABLE_COLUMNS.map((column) => (
-                        <th key={column}>{column}</th>
-                      ))}
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((record) => (
-                      <tr key={record.id}>
-                        <td className="id-cell">{record.id}</td>
-                        {TABLE_COLUMNS.slice(1).map((column) => (
-                          <td key={column}>
-                            <input
-                              type={column === 'Exam Date' ? 'datetime-local' : 'text'}
-                              value={record[column] ?? ''}
-                              onChange={(event) => updateExistingRecord(record.id, column, event.target.value)}
-                            />
-                          </td>
-                        ))}
-                        <td>
-                          <div className="actions">
-                            <button
-                              type="button"
-                              className="primary-button small"
-                              onClick={() => saveRecord(record)}
-                              disabled={savingId === record.id}
-                            >
-                              {savingId === record.id ? 'Saving...' : 'Save'}
-                            </button>
-                            <button
-                              type="button"
-                              className="danger-button small"
-                              onClick={() => deleteRecord(record.id)}
-                              disabled={savingId === record.id}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </section>
-        </section>
+      <main className="app-main" id="main">
+        {dataState.error && !dataState.loading ? (
+          <Banner
+            onRetry={() => {
+              setDataState({ loading: true, error: '' })
+              setReloadKey((key) => key + 1)
+            }}
+          >
+            {dataState.error}
+          </Banner>
+        ) : null}
+        {dataState.loading && !data.config ? <LoadingBlock label="Loading your courses…" /> : null}
+        {data.config ? (
+          <>
+            {tab === 'exams' ? <ExamsView {...shared} goToCourses={() => selectTab('courses')} /> : null}
+            {tab === 'courses' ? <CoursesView {...shared} goToFaculty={() => selectTab('faculty')} /> : null}
+            {tab === 'faculty' ? <FacultyView {...shared} /> : null}
+          </>
+        ) : null}
       </main>
+
+      <nav className="tabs-bottom" aria-label="Sections">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`bottom-tab${tab === item.id ? ' bottom-tab-active' : ''}`}
+            aria-current={tab === item.id ? 'page' : undefined}
+            onClick={() => selectTab(item.id)}
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      <Toasts toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }
