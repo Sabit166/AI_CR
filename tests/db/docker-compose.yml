@@ -14,6 +14,7 @@ services:
       - ../../supabase/migrations/20261013031653_legacy_exams_baseline.sql:/docker-entrypoint-initdb.d/10_baseline.sql:ro
       - ./20_legacy_seed.sql:/docker-entrypoint-initdb.d/20_legacy_seed.sql:ro
       - ../../supabase/migrations/20261013031917_dynamic_course_config.sql:/docker-entrypoint-initdb.d/30_dynamic_course_config.sql:ro
+      - ../../supabase/migrations/20261013150000_course_rules_update.sql:/docker-entrypoint-initdb.d/40_course_rules_update.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres && psql -U postgres -tAc \"select 1 from pg_tables where tablename='exams'\" | grep -q 1"]
       interval: 2s

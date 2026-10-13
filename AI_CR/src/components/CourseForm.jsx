@@ -10,7 +10,6 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
     title: course?.title ?? '',
     aliases: (course?.aliases ?? []).join(', '),
     faculty_ids: (course?.faculty ?? []).map((f) => f.id),
-    faculty_exception_note: course?.faculty_exception_note ?? '',
   }))
   const [touched, setTouched] = useState({})
   const [errors, setErrors] = useState({})
@@ -22,7 +21,6 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
   const parsed = parseCourseCode(form.code)
   const count = form.faculty_ids.length
   const countHint = parsed.courseType ? facultyCountHint(parsed.courseType, count, rules) : null
-  const needsNote = Boolean(countHint && !countHint.ok)
   const typeWillChange = editing && course.exam_count > 0 && parsed.courseType && parsed.courseType !== course.course_type
 
   function update(field, value) {
@@ -58,9 +56,7 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
     const next = {}
     if (parsed.error) next.code = parsed.error
     if (form.title.trim().length < 2) next.title = 'Course title is required.'
-    if (needsNote && form.faculty_exception_note.trim().length < 3) {
-      next.faculty_exception_note = 'Explain why this course has a different number of faculty.'
-    }
+    if (countHint && !countHint.ok) next.faculty_ids = `${countHint.text} You selected ${count}.`
     setErrors(next)
     if (Object.keys(next).length) return
 
@@ -73,7 +69,6 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
           title: form.title,
           aliases: form.aliases.split(',').map((a) => a.trim()).filter(Boolean),
           faculty_ids: form.faculty_ids,
-          faculty_exception_note: needsNote ? form.faculty_exception_note : null,
         },
       })
       onSaved(saved, !editing)
@@ -118,16 +113,16 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
       <p id="course-type-derived" className="derived" aria-live="polite">
         {parsed.courseType ? (
           <>
-            <TypeBadge type={parsed.courseType} /> {parsed.code}: {parsed.number} ends in an {parsed.parity} digit
+            <TypeBadge type={parsed.courseType} /> {parsed.code}
           </>
         ) : (
-          <span className="muted">Odd course numbers are Theoretical, even numbers are Sessional.</span>
+          <span className="muted">The course type is filled in from the code.</span>
         )}
       </p>
       {typeWillChange ? (
         <Banner>
-          This change would make the course {parsed.courseType}, but it already has exam records. Keep the same odd/even
-          number, or add a new course instead.
+          This code would make it a {parsed.courseType} course, but it already has exam records. Keep the original
+          code, or add a new course instead.
         </Banner>
       ) : null}
 
@@ -152,7 +147,7 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
       </Field>
 
       <CheckList
-        legend={`Faculty (${count} selected)`}
+        legend={`Course teachers (${count} selected)`}
         options={faculty.map((f) => ({ value: f.id, label: f.name }))}
         selected={form.faculty_ids}
         onToggle={toggleFaculty}
@@ -190,25 +185,6 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
         <p className="field-error" role="alert">
           {errors.new_faculty}
         </p>
-      ) : null}
-
-      {needsNote ? (
-        <Field
-          label="Reason for a different faculty count"
-          htmlFor="course-note"
-          hint={`${countHint.text} You selected ${count}. Add a short note to save anyway.`}
-          error={errors.faculty_exception_note}
-          required
-        >
-          <textarea
-            id="course-note"
-            rows={2}
-            maxLength={500}
-            value={form.faculty_exception_note}
-            onChange={(e) => update('faculty_exception_note', e.target.value)}
-            aria-invalid={Boolean(errors.faculty_exception_note)}
-          />
-        </Field>
       ) : null}
 
       {formError ? <Banner>{formError}</Banner> : null}

@@ -35,7 +35,7 @@ EXAM_TYPES = [
     {'name': 'Online Exam', 'course_type': 'Sessional', 'sort_order': 130, 'is_legacy': False},
     {'name': 'Project Presentation', 'course_type': 'Sessional', 'sort_order': 140, 'is_legacy': False},
     {'name': 'Lab Test', 'course_type': 'Sessional', 'sort_order': 150, 'is_legacy': False},
-    {'name': 'Mid', 'course_type': 'Theoretical', 'sort_order': 900, 'is_legacy': True},
+    {'name': 'Mid', 'course_type': 'Theoretical', 'sort_order': 25, 'is_legacy': False},
 ]
 
 F_NAZMUL = {'id': 1, 'name': 'Nazmul Hasan'}

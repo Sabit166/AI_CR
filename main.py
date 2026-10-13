@@ -17,6 +17,7 @@ load_dotenv()
 
 from Chatbot.Chatbot import answer  # noqa: E402  (needs env loaded first)
 from cr_api import router as cr_router  # noqa: E402
+from messenger_profile import question_for_postback  # noqa: E402
 from public_api import router as public_router  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
@@ -134,12 +135,18 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         for event in entry.get("messaging", []):
             sender = event.get("sender", {})
             message = event.get("message", {})
-            message_id = message.get("mid")
+            postback = event.get("postback")
 
-            if not sender.get("id") or not message or message.get("is_echo"):
-                continue
-            user_message = message.get("text")
-            if not user_message:
+            if postback:
+                # Ice breaker tapped: answer its fixed question like a typed message.
+                message_id = postback.get("mid")
+                user_message = question_for_postback(postback)
+            else:
+                if not message or message.get("is_echo"):
+                    continue
+                message_id = message.get("mid")
+                user_message = message.get("text")
+            if not sender.get("id") or not user_message:
                 continue
             if message_id and not _first_time_seen(message_id):
                 continue

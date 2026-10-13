@@ -63,6 +63,9 @@ The board is read-only — you can look, but only CRs can change anything.
 
 Message our class **Facebook Page** and type your question — in plain English, the way you'd ask a classmate.
 
+New to the chat? Just tap one of the ready-made questions: **Next exam date**, **Next exam syllabus**,
+**Next exam notes** or **Next week's update**.
+
 ### Questions you can ask
 
 | You want to know… | Try asking |
@@ -129,12 +132,11 @@ The dashboard has three tabs at the bottom of the screen:
 
 1. **Faculty** → add each teacher's full name.
 2. **Courses** → **+ Add course** for every course this term:
-   - Type the **course code** (e.g. `CSE-415`). The type is filled in for you:
-     **odd numbers are Theoretical, even numbers are Sessional.**
+   - Type the **course code** (e.g. `CSE-415`). Whether it's Theoretical or Sessional is filled in for you.
    - Enter the **course title**.
    - Add any **short names** students use (e.g. *HCI*, *DBMS*) so the assistant recognises them.
-   - Tick the **teachers**: usually **2** for a Theoretical course and **3–4** for a Sessional course.
-     If yours is different, add a short note explaining why.
+   - Tick the **course teachers**: exactly **2** for a Theoretical course; for a Sessional course, as many as
+     take it.
 3. Remove last term's courses with **Remove**. Their old exam records are kept.
 
 ### ✍️ Posting an exam
@@ -145,10 +147,11 @@ The dashboard has three tabs at the bottom of the screen:
 
    | Theoretical courses | Sessional courses |
    |---|---|
-   | CT 1 · CT 2 · CT 3 | Project Update · Evaluation · Online Exam · Project Presentation · Lab Test |
+   | CT 1 · CT 2 · Mid · CT 3 | Project Update · Evaluation · Online Exam · Project Presentation · Lab Test |
 
 4. Pick the **date**, and the **time** if you know it.
-5. Enter the **section**, or leave it empty if the exam is for the whole class.
+5. **Sessional only:** enter the **section**, or leave it empty if it's for the whole class.
+   Theoretical exams are held for every section on the same day, so there's no section to fill in.
 6. Tick the **teacher(s)** taking it (optional).
 7. Write the **syllabus**. Line breaks are kept exactly as you type them.
 8. Optionally open **More details** for venue, a notes link, or remarks.
@@ -168,7 +171,7 @@ Students can ask about it — and see it on the exam board — the moment you sa
 - **Nothing is lost if a save fails.** Your entries stay in the form; just tap Save again.
 - **Closed the page by accident?** Your unfinished exam is restored the next time you tap **+ New exam**.
 - **Tapped Save twice?** Only one exam is created.
-- **Two exams of the same type for the same course on the same day and section** aren't allowed — edit the existing one instead.
+- **Two exams of the same type for the same course on the same day** (and, for Sessional, the same section) aren't allowed — edit the existing one instead.
 
 ---
 
@@ -225,9 +228,9 @@ Ask the project maintainer to create your account and approve it as a CR.
 </details>
 
 <details>
-<summary><b>Why is my course marked Theoretical / Sessional?</b></summary>
+<summary><b>Why is there no section option for my CT?</b></summary>
 
-It's decided by the course number: odd numbers (e.g. 415) are Theoretical and even numbers (e.g. 464) are Sessional.
+CTs and the Mid of Theoretical courses happen on the same day for every section, so they're posted once for the whole class. Sessional exams can differ by section, so those have a section field.
 </details>
 
 ---

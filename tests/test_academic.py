@@ -40,7 +40,8 @@ def test_parity_uses_number_not_ascii():
 
 @pytest.mark.parametrize('course_type,count,ok', [
     ('Theoretical', 2, True), ('Theoretical', 1, False), ('Theoretical', 3, False),
-    ('Sessional', 3, True), ('Sessional', 4, True), ('Sessional', 2, False), ('Sessional', 5, False),
+    ('Theoretical', 0, False),
+    ('Sessional', 0, True), ('Sessional', 1, True), ('Sessional', 2, True), ('Sessional', 5, True), ('Sessional', 9, True),
 ])
 def test_faculty_count_rules(course_type, count, ok):
     assert (academic.faculty_count_error(course_type, count) is None) == ok
@@ -52,3 +53,8 @@ def test_section_normalization():
     assert academic.normalize_section(' b ') == 'B'
     with pytest.raises(ValueError):
         academic.normalize_section('A; drop table')
+
+
+def test_sections_only_for_sessional():
+    assert academic.has_sections('Sessional') is True
+    assert academic.has_sections('Theoretical') is False

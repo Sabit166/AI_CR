@@ -151,7 +151,7 @@ class CourseIn(BaseModel):
     title: str = Field(max_length=200)
     aliases: list[str] = Field(default_factory=list, max_length=10)
     faculty_ids: list[int] = Field(default_factory=list, max_length=8)
-    faculty_exception_note: str | None = Field(default=None, max_length=500)
+    faculty_exception_note: str | None = Field(default=None, max_length=500)  # ignored; kept for old clients
 
     @field_validator('title')
     @classmethod
@@ -175,10 +175,8 @@ def _validate_course(body: CourseIn) -> tuple[str, str]:
     if not parsed.ok:
         raise _fail(422, parsed.error, 'code')
     count_error = academic.faculty_count_error(parsed.course_type, len(set(body.faculty_ids)))
-    note = (body.faculty_exception_note or '').strip()
-    if count_error and len(note) < 3:
-        raise _fail(422, f'{count_error} Select the usual number, or add a short exception note explaining why.',
-                    'faculty_ids', can_override=True)
+    if count_error:
+        raise _fail(422, count_error, 'faculty_ids')
     return parsed.code, parsed.course_type
 
 
@@ -192,13 +190,10 @@ def list_courses(user: CR) -> dict:
 
 def _save_course(course_id: int | None, body: CourseIn) -> dict:
     code, _ = _validate_course(body)
-    note = (body.faculty_exception_note or '').strip() or None
-    if not academic.faculty_count_error(academic.course_type_for_code(code), len(set(body.faculty_ids))):
-        note = None  # the exception note only applies when the count is unusual
     try:
         saved_id = db_fetch.save_course(
             course_id=course_id, code=code, title=body.title, aliases=body.aliases,
-            faculty_ids=sorted(set(body.faculty_ids)), faculty_exception_note=note,
+            faculty_ids=sorted(set(body.faculty_ids)), faculty_exception_note=None,
         )
         course = db_fetch.fetch_course(saved_id)
     except db_fetch.DatabaseError as error:
@@ -306,6 +301,8 @@ def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | Non
     if not unchanged and not set(faculty_ids) <= course_faculty:
         raise _fail(422, 'Selected faculty must be assigned to this course.', 'faculty_ids')
 
+    if not academic.has_sections(course['course_type']):
+        return course, None  # Theoretical exams are for the whole class
     try:
         section = academic.normalize_section(body.section)
     except ValueError as error:
@@ -411,7 +408,7 @@ def preview_exam(body: ExamIn, user: CR) -> dict:
         raise _fail(422, 'Select a course.', 'course_id')
     picked = [f['name'] for f in course['faculty'] if f['id'] in set(body.faculty_ids)]
     try:
-        section = academic.normalize_section(body.section)
+        section = academic.normalize_section(body.section) if academic.has_sections(course['course_type']) else None
     except ValueError as error:
         raise _fail(422, str(error), 'section') from error
     row = {

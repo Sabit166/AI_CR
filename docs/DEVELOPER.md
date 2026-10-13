@@ -31,8 +31,8 @@ Messenger ──► POST /webhook (main.py) ──► Chatbot.answer ──► S
 |---|---|
 | `courses` | Code, title, aliases. `course_type` is a generated column from the code (odd = Theoretical, even = Sessional). Active = `archived_at is null`; one active row per code. |
 | `faculty`, `course_faculty` | One faculty directory, many-to-many with courses. |
-| `exam_types` | The single list of allowed exam types per course type (CT 1–3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). `Mid` is kept only for imported legacy rows. |
-| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; optional section (NULL = whole class), syllabus, venue, remarks, notes link. |
+| `exam_types` | The single list of allowed exam types per course type (CT 1, CT 2, Mid, CT 3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). |
+| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; section for Sessional exams only (NULL = whole class; always NULL for Theoretical, enforced by the `exams_theory_whole_class` trigger), syllabus, venue, remarks, notes link. |
 | `exam_details` (view) | Read model used by the bot and dashboard. |
 | `cr_save_course`, `cr_save_exam`, `cr_remove_course`, `cr_remove_faculty` | Transactional write RPCs; validation is repeated in triggers. |
 | `cr_members` | Supabase Auth users allowed to use the dashboard. |
@@ -42,7 +42,9 @@ The original flat `"Exams"` table is left untouched; its rows were copied into t
 ### Business rules
 
 - **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`), with shared test vectors.
-- **Faculty per course**: Theoretical 2, Sessional 3–4. A different count needs a short exception note (stored as `faculty_exception_note`).
+- **Faculty per course**: Theoretical exactly 2 (no override), Sessional any number. `faculty_exception_note` is no longer used.
+- **Sections**: only Sessional exams have one; CTs/Mid are held for every section on the same day. The dashboard hides the field and the API/DB drop any section sent for a Theoretical course.
+- The odd/even rule is not shown in the dashboard or student pages; CRs only see the resulting type.
 - **Exam types** must match the course type — enforced by the API and by a database trigger.
 - **Removing a course** that has exams archives it (history kept); a course without exams is deleted.
 - **Duplicate saves**: the exam form sends a `client_request_id`; retries return the same row. A second exam with the same course, type, date and section is rejected.
@@ -105,6 +107,10 @@ Tests never touch Supabase: `tests/conftest.py` pins harmless connection setting
 file names in `supabase/migrations/`). All 6 legacy rows were copied. The steps below are for
 a fresh project or for reference; step 5 (CR account) still has to be done once.
 
+**Pending:** `20261013150000_course_rules_update.sql` (Theoretical = exactly 2 teachers, Sessional any number,
+no sections on Theoretical exams, Mid enabled). Apply it **before** deploying the backend that expects these rules;
+rollback in `supabase/rollback/20261013150000_course_rules_update_down.sql`.
+
 `supabase/migrations/20261013031917_dynamic_course_config.sql` is the real change;
 `20261013031653_legacy_exams_baseline.sql` only documents the existing table (a no-op on the live database).
 
@@ -162,6 +168,18 @@ no timestamps), the same information the Messenger bot already gives anyone. Res
 
 The web app is two Vite pages (`index.html` → `src/student/`, `cr/index.html` → `src/main.jsx`); the student
 bundle does not include Supabase. `AI_CR/vercel.json` rewrites `/cr/*` to the dashboard page.
+
+### Messenger ice breakers
+
+The four ready-made questions a student sees in a new chat (Next exam date / syllabus / notes, Next week's update)
+live in `messenger_profile.py`. Tapping one sends a postback; `main.py` maps its payload to a fixed question and
+answers it like a typed message. To publish them (and after any change):
+
+1. Meta app dashboard → Messenger → Webhooks → make sure the Page is subscribed to **`messaging_postbacks`**
+   (in addition to `messages`).
+2. `python scripts/setup_messenger.py` (uses `PAGE_ACCESS_TOKEN` from `.env`); `--show` prints the current ones.
+
+Ice breakers appear only in a chat that has no messages yet (try from another account, or delete the conversation).
 
 ### Removed
 

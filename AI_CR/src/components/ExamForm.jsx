@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api.js'
+import { hasSections } from '../lib/academic.js'
 import { Banner, CheckList, ChipGroup, Field, Spinner, TypeBadge } from './ui.jsx'
 
 const DRAFT_KEY = 'aicr:exam-draft'
@@ -65,6 +66,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
   }, [courses, exam])
 
   const course = courseOptions.find((c) => c.id === form.course_id) ?? null
+  const sectioned = course ? hasSections(course.course_type) : false
 
   const examTypes = useMemo(() => {
     if (!course) return []
@@ -94,6 +96,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       // Never carry over an exam type or teachers that belong to a different course.
       exam_type: allowed.includes(current.exam_type) ? current.exam_type : '',
       faculty_ids: current.faculty_ids.filter((id) => facultyIds.has(id)),
+      section: hasSections(next.course_type) ? current.section : '',
     }))
     setErrors({})
   }
@@ -108,7 +111,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       exam_type: form.exam_type,
       exam_date: form.exam_date,
       exam_time: form.exam_time || null,
-      section: form.section.trim() || null,
+      section: sectioned ? form.section.trim() || null : null,
       syllabus: form.syllabus,
       venue: form.venue,
       remarks: form.remarks,
@@ -126,7 +129,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
     if (form.notes_link.trim() && !/^https?:\/\/\S+$/i.test(form.notes_link.trim())) {
       next.notes_link = 'Use a full link starting with https://'
     }
-    if (form.section.trim() && !/^[A-Za-z0-9]{1,10}$/.test(form.section.trim())) {
+    if (sectioned && form.section.trim() && !/^[A-Za-z0-9]{1,10}$/.test(form.section.trim())) {
       next.section = 'Use letters or numbers only, e.g. A. Leave empty for the whole class.'
     }
     setErrors(next)
@@ -244,19 +247,21 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
         </Field>
       </div>
 
-      <Field label="Section" htmlFor="exam-section" hint="Leave empty if it's for the whole class." error={errors.section}>
-        <input
-          id="exam-section"
-          type="text"
-          inputMode="text"
-          autoCapitalize="characters"
-          maxLength={10}
-          placeholder="Whole class"
-          value={form.section}
-          onChange={(e) => update('section', e.target.value.toUpperCase())}
-          aria-invalid={Boolean(errors.section)}
-        />
-      </Field>
+      {sectioned ? (
+        <Field label="Section" htmlFor="exam-section" hint="Leave empty if it's for the whole class." error={errors.section}>
+          <input
+            id="exam-section"
+            type="text"
+            inputMode="text"
+            autoCapitalize="characters"
+            maxLength={10}
+            placeholder="Whole class"
+            value={form.section}
+            onChange={(e) => update('section', e.target.value.toUpperCase())}
+            aria-invalid={Boolean(errors.section)}
+          />
+        </Field>
+      ) : null}
 
       {course ? (
         <CheckList

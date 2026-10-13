@@ -18,10 +18,11 @@ COURSE_TYPES = (THEORETICAL, SESSIONAL)
 _INPUT_CODE_RE = re.compile(r'^\s*([A-Za-z]{2,5})[\s_-]*([0-9]{3,4})\s*$')
 CANONICAL_CODE_RE = re.compile(r'^[A-Z]{2,5}-[0-9]{3,4}$')
 
-# Expected faculty counts per course type (inclusive range).
-FACULTY_COUNT_RULES: dict[str, tuple[int, int]] = {
+# Faculty counts per course type (inclusive; None = no upper limit).
+# Theoretical courses always have exactly two course teachers; Sessional is up to the CR.
+FACULTY_COUNT_RULES: dict[str, tuple[int, int | None]] = {
     THEORETICAL: (2, 2),
-    SESSIONAL: (3, 4),
+    SESSIONAL: (0, None),
 }
 
 SECTION_RE = re.compile(r'^[A-Z0-9]{1,10}$')
@@ -70,10 +71,15 @@ def parse_course_code(raw: str | None) -> CourseCode:
 
 def faculty_count_error(course_type: str, count: int) -> str | None:
     low, high = FACULTY_COUNT_RULES[course_type]
-    if low <= count <= high:
+    if count >= low and (high is None or count <= high):
         return None
-    expected = str(low) if low == high else f'{low} or {high}'
-    return f'{course_type} courses normally have {expected} faculty members (selected {count}).'
+    expected = f'exactly {low}' if low == high else f'at least {low}' if high is None else f'{low} to {high}'
+    return f'{course_type} courses need {expected} course teachers (selected {count}).'
+
+
+def has_sections(course_type: str) -> bool:
+    """Theoretical exams (CTs, Mid) are held for every section on the same day."""
+    return course_type == SESSIONAL
 
 
 def normalize_section(raw: str | None) -> str | None:

@@ -84,7 +84,6 @@ export default function CoursesView({ data, notify, reloadCatalog }) {
                   👤 {course.faculty.length ? course.faculty.map((f) => f.name).join(', ') : 'No faculty assigned'}
                 </p>
                 {course.aliases.length ? <p className="muted small">Also called: {course.aliases.join(', ')}</p> : null}
-                {course.faculty_exception_note ? <p className="muted small">Note: {course.faculty_exception_note}</p> : null}
                 <p className="muted small">
                   {course.exam_count} exam record{course.exam_count === 1 ? '' : 's'}
                 </p>

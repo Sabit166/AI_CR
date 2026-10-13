@@ -3,9 +3,10 @@
 
 const INPUT_CODE_RE = /^\s*([A-Za-z]{2,5})[\s_-]*([0-9]{3,4})\s*$/
 
+// Theoretical courses always have exactly two course teachers; Sessional is up to the CR (max null = no limit).
 export const FACULTY_RULES = {
   Theoretical: { min: 2, max: 2 },
-  Sessional: { min: 3, max: 4 },
+  Sessional: { min: 0, max: null },
 }
 
 export function parseCourseCode(raw) {
@@ -25,8 +26,6 @@ export function parseCourseCode(raw) {
   return {
     code,
     courseType: lastDigit % 2 === 0 ? 'Sessional' : 'Theoretical',
-    parity: lastDigit % 2 === 0 ? 'even' : 'odd',
-    number,
     error: null,
   }
 }
@@ -34,9 +33,13 @@ export function parseCourseCode(raw) {
 export function facultyCountHint(courseType, count, rules = FACULTY_RULES) {
   const rule = rules[courseType]
   if (!rule) return null
-  const expected = rule.min === rule.max ? `${rule.min}` : `${rule.min} or ${rule.max}`
-  return {
-    ok: count >= rule.min && count <= rule.max,
-    text: `${courseType} courses normally have ${expected} faculty members.`,
-  }
+  const ok = count >= rule.min && (rule.max == null || count <= rule.max)
+  if (rule.max == null) return { ok, text: 'Select every teacher who takes this course.' }
+  const expected = rule.min === rule.max ? `exactly ${rule.min}` : `${rule.min} to ${rule.max}`
+  return { ok, text: `${courseType} courses have ${expected} course teachers.` }
+}
+
+/** Theoretical exams (CTs, Mid) are held for every section on the same day. */
+export function hasSections(courseType) {
+  return courseType === 'Sessional'
 }

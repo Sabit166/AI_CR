@@ -113,6 +113,8 @@ def test_legacy_backfill():
     assert legacy[3]['course_code'] == 'GEEM-433' and legacy[3]['exam_type'] == 'Mid'
     assert legacy[4]['section'] is None and legacy[4]['faculty_names'] == ['Nafisa Maliyat']
     assert legacy[4]['faculty_source'] == 'legacy'
+    # Theoretical exams are whole-class: the rules migration cleared their legacy sections.
+    assert all(r['section'] is None for r in legacy.values() if r['course_type'] == 'Theoretical')
     sdp = next(c for c in db_fetch.fetch_active_courses() if c['code'] == 'CSE-464')
     assert sdp['title'] == 'Software Development Project-2' or 'Software Development Project-2' in sdp['aliases']
     assert sdp['course_type'] == 'Sessional'
@@ -153,10 +155,17 @@ def test_db_rejects_bad_codes_and_counts_even_without_backend_validation():
     with pytest.raises(db_fetch.DatabaseError) as err:
         course(f'{p}-301A', 'Bad', faculty(2))
     assert err.value.code == 'invalid_course_code'
-    with pytest.raises(db_fetch.DatabaseError) as err:
-        course(f'{p}-301', 'Too few', faculty(1))
+    for count in (0, 1, 3):
+        with pytest.raises(db_fetch.DatabaseError) as err:
+            course(f'{p}-301', 'Theory', faculty(count))
+        assert err.value.code == 'faculty_count'
+    with pytest.raises(db_fetch.DatabaseError) as err:  # no exception-note override any more
+        course(f'{p}-301', 'With note', faculty(1), note='Single teacher this term')
     assert err.value.code == 'faculty_count'
-    assert course(f'{p}-301', 'With note', faculty(1), note='Single teacher this term')
+    # Sessional: any number of teachers
+    for i, count in enumerate((0, 1, 2, 5)):
+        cid = course(f'{p}-{302 + 2 * i}', 'Lab', faculty(count), note='ignored')
+        assert db_fetch.fetch_course(cid)['faculty_exception_note'] is None
 
 
 def test_duplicate_active_course_rejected_but_archived_code_reusable():
@@ -215,7 +224,8 @@ def test_exam_type_must_match_course_type_at_db_level():
     p = prefix()
     theory = course(f'{p}-301', 'Theory', faculty(2))
     lab = course(f'{p}-302', 'Lab', faculty(3))
-    for cid, bad in ((theory, 'Lab Test'), (lab, 'CT 1'), (theory, 'Mid')):
+    assert exam(theory, 'Mid', far_week(5))  # Mid is a regular Theoretical type now
+    for cid, bad in ((theory, 'Lab Test'), (lab, 'CT 1'), (lab, 'Mid')):
         with pytest.raises(db_fetch.DatabaseError) as err:
             exam(cid, bad, far_week(5))
         assert err.value.code == 'invalid_exam_type'
@@ -244,7 +254,26 @@ def test_double_submit_creates_one_row_and_duplicates_are_rejected():
     with pytest.raises(db_fetch.DatabaseError) as err:
         exam(cid, 'CT 1', far_week(7))  # new submission, same course/type/date/section
     assert err.value.code == 'duplicate'
-    assert exam(cid, 'CT 1', far_week(7), section='B')  # different section is fine
+    with pytest.raises(db_fetch.DatabaseError) as err:  # Theoretical: the section is dropped, so still a duplicate
+        exam(cid, 'CT 1', far_week(7), section='B')
+    assert err.value.code == 'duplicate'
+    lab = course(f'{p}-302', 'Lab', faculty(1))
+    assert exam(lab, 'Lab Test', far_week(7), section='A')
+    assert exam(lab, 'Lab Test', far_week(7), section='B')  # Sessional: different section is fine
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        exam(lab, 'Lab Test', far_week(7), section='a')
+    assert err.value.code == 'duplicate'
+
+
+def test_theoretical_exams_never_store_a_section():
+    p = prefix()
+    theory = course(f'{p}-301', 'Theory', faculty(2))
+    via_rpc = exam(theory, 'CT 1', far_week(9), section='A')
+    assert db_fetch.get_exam(via_rpc)['section'] is None
+    # Even a raw insert with the service key goes through the trigger
+    db_fetch._rest('POST', 'exams', payload={'course_id': theory, 'exam_type': 'CT 2', 'exam_date': '2031-03-09', 'section': 'C'})
+    rows = db_fetch.query_exams(db_fetch.ExamQuery(course_ids=(theory,)))
+    assert [r['section'] for r in rows] == [None, None]
 
 
 def test_edit_exam_and_faculty_selection():
@@ -267,9 +296,9 @@ def test_agent_weekly_and_filters_against_real_db():
     theory = course(f'{p}-301', f'Quantum Widgets {tag}', fac[:2])
     lab = course(f'{p}-302', f'Quantum Widgets {tag} Lab', fac)
     sunday = far_week(20)
-    exam(theory, 'CT 1', sunday, time='09:00', section='A', syllabus='Ch 1\nCh 2')
-    exam(lab, 'Lab Test', sunday + timedelta(days=2), time='14:00')
-    exam(theory, 'CT 2', sunday + timedelta(days=4), section='B', faculty_ids=[fac[1]])
+    exam(theory, 'CT 1', sunday, time='09:00', syllabus='Ch 1\nCh 2')
+    exam(lab, 'Lab Test', sunday + timedelta(days=2), time='14:00', section='A')
+    exam(theory, 'CT 2', sunday + timedelta(days=4), faculty_ids=[fac[1]])
     exam(theory, 'CT 3', sunday + timedelta(days=7))               # following week: must not appear
 
     cache = CatalogCache(ttl=0)
@@ -284,8 +313,11 @@ def test_agent_weekly_and_filters_against_real_db():
     assert 'Ch 1\nCh 2' in text
     assert reply.metrics.llm_calls == 0 and reply.metrics.db_calls == 3   # 2 catalog + 1 exam query
 
-    section_a = answer(f'next week exams of {p}-301 for section A', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
-    assert 'CT 1' in section_a.text and 'CT 2' not in section_a.text
+    # Whole-class (Theoretical) exams show for every section; sectioned Sessional ones only for theirs.
+    section_a = answer('next week exams for section A', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    assert all(t in section_a.text for t in ('CT 1', 'Lab Test', 'CT 2')), section_a.text
+    section_b = answer(f'next week exams of {p}-302 for section B', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    assert 'Lab Test' not in section_b.text
 
     teacher = db_fetch.fetch_faculty()
     second_name = next(f['name'] for f in teacher if f['id'] == fac[1])

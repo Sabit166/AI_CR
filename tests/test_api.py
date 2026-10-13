@@ -109,23 +109,31 @@ def test_invalid_course_code_rejected(client, code):
 
 
 @pytest.mark.parametrize('code,faculty,ok', [
-    ('CSE-433', [1, 2], True), ('CSE-433', [1], False), ('CSE-433', [1, 2, 3], False),
-    ('CSE-434', [1, 2, 3], True), ('CSE-434', [1, 2, 3, 4], True), ('CSE-434', [1, 2], False),
+    ('CSE-433', [1, 2], True), ('CSE-433', [1], False), ('CSE-433', [1, 2, 3], False), ('CSE-433', [], False),
+    ('CSE-434', [], True), ('CSE-434', [1], True), ('CSE-434', [1, 2], True), ('CSE-434', [1, 2, 3, 4, 5], True),
 ])
 def test_faculty_count_rules(client, monkeypatch, code, faculty, ok):
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid})
     r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': code, 'title': 'Course', 'faculty_ids': faculty})
     assert (r.status_code == 201) == ok, r.text
     if not ok:
-        assert r.json()['detail']['can_override'] is True
+        assert r.json()['detail']['field'] == 'faculty_ids'
+        assert 'exactly 2' in r.json()['detail']['message']
 
 
-def test_faculty_count_exception_with_note(client, monkeypatch):
+def test_theoretical_count_has_no_override(client, monkeypatch):
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid})
     r = client.post('/api/courses', headers=h(CR_TOKEN), json={
-        'code': 'CSE-434', 'title': 'Course', 'faculty_ids': [1, 2], 'faculty_exception_note': 'Only two teachers this term'})
+        'code': 'CSE-433', 'title': 'Course', 'faculty_ids': [1], 'faculty_exception_note': 'Only one teacher'})
+    assert r.status_code == 422 and client.writes == []
+
+
+def test_exception_note_is_ignored(client, monkeypatch):
+    monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid})
+    r = client.post('/api/courses', headers=h(CR_TOKEN), json={
+        'code': 'CSE-434', 'title': 'Course', 'faculty_ids': [1], 'faculty_exception_note': 'old client'})
     assert r.status_code == 201
-    assert client.writes[0][1]['faculty_exception_note'] == 'Only two teachers this term'
+    assert client.writes[0][1]['faculty_exception_note'] is None
 
 
 def test_duplicate_course_conflict(client, monkeypatch):
@@ -154,7 +162,7 @@ def test_create_exam(client):
 @pytest.mark.parametrize('course_id,exam_type', [
     (1, 'Lab Test'),            # Theoretical + sessional type
     (3, 'CT 1'),                # Sessional + CT
-    (1, 'Mid'),                 # legacy type not allowed for new records
+    (3, 'Mid'),                 # Mid is Theoretical only
     (1, 'Viva'),
 ])
 def test_invalid_exam_type_combination_rejected(client, course_id, exam_type):
@@ -162,6 +170,27 @@ def test_invalid_exam_type_combination_rejected(client, course_id, exam_type):
     assert r.status_code == 422
     assert r.json()['detail']['field'] == 'exam_type'
     assert client.writes == []
+
+
+@pytest.mark.parametrize('exam_type', ['CT 1', 'CT 2', 'Mid', 'CT 3'])
+def test_theoretical_types_accepted(client, exam_type):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'exam_type': exam_type})
+    assert r.status_code == 201, r.text
+
+
+def test_theoretical_exam_is_always_whole_class(client):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'B'})
+    assert r.status_code == 201, r.text
+    assert client.writes[0][1]['section'] is None
+    # A section is irrelevant for a Theoretical course, so even an invalid one is not an error.
+    assert client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'A B'}).status_code == 201
+
+
+def test_sessional_exam_keeps_section(client):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_id': 3, 'exam_type': 'Lab Test',
+                                                             'faculty_ids': [4], 'section': 'b'})
+    assert r.status_code == 201, r.text
+    assert client.writes[0][1]['section'] == 'B'
 
 
 @pytest.mark.parametrize('exam_type', ['Project Update', 'Evaluation', 'Online Exam', 'Project Presentation', 'Lab Test'])
@@ -177,12 +206,18 @@ def test_faculty_must_belong_to_course(client):
 
 @pytest.mark.parametrize('field,value', [
     ('notes_link', 'javascript:alert(1)'), ('notes_link', 'drive.google.com/x'),
-    ('section', 'A B'), ('exam_date', '2026-02-30'), ('exam_date', '1999-01-01'), ('syllabus', 'x' * 10001),
+    ('exam_date', '2026-02-30'), ('exam_date', '1999-01-01'), ('syllabus', 'x' * 10001),
 ])
 def test_field_validation(client, field, value):
     r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, field: value})
     assert r.status_code == 422
     assert client.writes == []
+
+
+def test_invalid_section_rejected_for_sessional(client):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_id': 3, 'exam_type': 'Lab Test',
+                                                             'faculty_ids': [4], 'section': 'A B'})
+    assert r.status_code == 422 and r.json()['detail']['field'] == 'section'
 
 
 def test_failed_save_reports_failure(client, monkeypatch):
@@ -197,7 +232,8 @@ def test_preview_uses_bot_formatter(client):
     r = client.post('/api/exams/preview', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'a'})
     assert r.status_code == 200
     text = r.json()['text']
-    assert 'CSE-415 · Human Computer Interface' in text and 'Section A' in text and 'Ch 1\nCh 2' in text
+    assert 'CSE-415 · Human Computer Interface' in text and 'Ch 1\nCh 2' in text
+    assert 'Section A' not in text  # Theoretical: whole class
     assert 'Nazmul Hasan' in text and 'Fairooz' not in text
 
 
@@ -236,6 +272,31 @@ def test_webhook_ignores_echoes_and_non_text(client, monkeypatch):
     ]}]}
     assert client.post('/webhook', json=body).status_code == 200
     assert sent == []
+
+
+@pytest.mark.parametrize('payload,question', [
+    ('NEXT_EXAM_DATE', 'When is the next exam?'),
+    ('NEXT_EXAM_SYLLABUS', 'What is the syllabus of the next exam?'),
+    ('NEXT_EXAM_NOTES', 'Notes of the next exam'),
+    ('NEXT_WEEK_UPDATE', 'What exams are scheduled next week?'),
+])
+def test_webhook_answers_ice_breakers(client, monkeypatch, payload, question):
+    asked, sent = [], []
+    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: sent.append((rid, text)))
+    monkeypatch.setattr(main, 'answer', lambda message: asked.append(message) or type('R', (), {'messages': ['ok']})())
+    event = {'entry': [{'messaging': [{'sender': {'id': 'S9'}, 'postback': {'mid': f'pb-{payload}', 'title': 'x', 'payload': payload}}]}]}
+    assert client.post('/webhook', json=event).status_code == 200
+    assert client.post('/webhook', json=event).status_code == 200   # retry answered once
+    assert asked == [question] and sent == [('S9', 'ok')]
+
+
+def test_webhook_unknown_postback_uses_title(client, monkeypatch):
+    asked = []
+    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: None)
+    monkeypatch.setattr(main, 'answer', lambda message: asked.append(message) or type('R', (), {'messages': ['ok']})())
+    event = {'entry': [{'messaging': [{'sender': {'id': 'S9'}, 'postback': {'title': 'Exams this week', 'payload': 'OLD'}}]}]}
+    client.post('/webhook', json=event)
+    assert asked == ['Exams this week']
 
 
 def test_webhook_signature_enforced_when_secret_set(client, monkeypatch):
