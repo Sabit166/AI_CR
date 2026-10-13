@@ -9,11 +9,9 @@ same Supabase data.
 ## Deployment
 
 - FastAPI backend + Messenger webhook (Render): https://ai-cr.onrender.com/
-- Web app (Vercel): https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/
+- Web app (Vercel production domain): https://ai-cr-three.vercel.app/
   - `/` — public, read-only student exam board (no sign-in; calls only `GET /api/public/*`)
   - `/cr/` — CR dashboard (Supabase sign-in + `cr_members`)
-  (a per-deployment URL: it changes with every deploy and is behind Vercel's login by default.
-  For a stable public link use the project's production domain from Vercel → Overview → Domains.)
 
 ## Architecture
 

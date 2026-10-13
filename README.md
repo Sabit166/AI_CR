@@ -6,7 +6,7 @@
 
 *Ask on Messenger. Get the answer straight from what your CR posted.*
 
-[**💬 Ask on Messenger**](https://m.me/61592083183113) &nbsp;·&nbsp; [**🗓️ Open the exam board**](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/)
+[**💬 Ask on Messenger**](https://m.me/61592083183113) &nbsp;·&nbsp; [**🗓️ Open the exam board**](https://ai-cr-three.vercel.app/)
 
 </div>
 
@@ -33,7 +33,7 @@ exactly what was posted — no guessing, no outdated screenshots.
 
 | | |
 |---|---|
-| 💬 **Students** | [Ask on Messenger](https://m.me/61592083183113) in your own words, or browse the [exam board](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/). |
+| 💬 **Students** | [Ask on Messenger](https://m.me/61592083183113) in your own words, or browse the [exam board](https://ai-cr-three.vercel.app/). |
 | 🗂️ **Class representatives** | Keep the term's courses, teachers and exams up to date from your phone. |
 
 ---
@@ -44,7 +44,7 @@ There are two ways to check your exams — no account needed for either.
 
 ### 🗓️ The exam board
 
-**🔗 [https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/)**
+**🔗 [https://ai-cr-three.vercel.app/](https://ai-cr-three.vercel.app/)**
 
 A simple page listing every upcoming exam, grouped into **This week**, **Next week** and **Later**:
 
@@ -111,9 +111,9 @@ Everything in a reply comes from what your CR posted. If something hasn't been p
 
 Open the CR dashboard on your phone or laptop:
 
-**🔗 [https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/cr/](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/cr/)**
+**🔗 [https://ai-cr-three.vercel.app/cr/](https://ai-cr-three.vercel.app/cr/)**
 
-Sign in with the email and password set up for you. Only approved class representatives can sign in. (Students use the read-only [exam board](https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/) instead — it has a small **CR sign-in** link at the bottom.)
+Sign in with the email and password set up for you. Only approved class representatives can sign in. (Students use the read-only [exam board](https://ai-cr-three.vercel.app/) instead — it has a small **CR sign-in** link at the bottom.)
 
 > 📱 Tip: on your phone, use your browser's **Add to Home Screen** to open it like an app.
 
@@ -197,7 +197,7 @@ It means your CR hasn't posted one for that time yet. When in doubt, check with 
 <details>
 <summary><b>Do I need an account to see the exam board?</b></summary>
 
-No. Just open <a href="https://ai-7d0xf8qjm-sabit166s-projects.vercel.app/">the exam board</a>. Only CRs need to sign in.
+No. Just open <a href="https://ai-cr-three.vercel.app/">the exam board</a>. Only CRs need to sign in.
 </details>
 
 <details>
