@@ -52,12 +52,15 @@ def format_exam(row: dict, requested: list[str], *, today: date | None = None) -
     lines = [f"📘 {row['course_code']} · {row['course_title']}"]
 
     type_line = f"📝 {row['exam_type']}"
+    # Theoretical exams are per course section; Sessional tests are per class section.
     if row.get('section'):
-        type_line += f" · Section {row['section']}"
+        type_line += f" · Class Section {row['section']}"
     elif row.get('course_section'):
-        type_line += f" · Section {row['course_section']}"
+        type_line += f" · Course Section {row['course_section']}"
     elif row.get('course_type') == 'Theoretical':
-        type_line += ' · Sections A & B'
+        type_line += ' · Course Sections A & B'
+    elif row.get('course_type') == 'Sessional':
+        type_line += ' · Class Sections A & B (together)'
     lines.append(type_line)
 
     when = _date_text(row['exam_date'])
@@ -82,7 +85,7 @@ def format_exam(row: dict, requested: list[str], *, today: date | None = None) -
         by_section = [] if row.get('faculty_source') == 'exam' else row.get('section_faculty') or []
         label = 'Course faculty' if row.get('faculty_source') == 'course' and not by_section else 'Faculty'
         if len(by_section) > 1 and len({item['name'] for item in by_section}) > 1:
-            lines.append('👤 Faculty: ' + ' · '.join(f"Section {i['section']}: {i['name']}" for i in by_section))
+            lines.append('👤 Faculty: ' + ' · '.join(f"Course Section {i['section']}: {i['name']}" for i in by_section))
         elif names:
             lines.append(f"👤 {label}: {', '.join(names)}")
         elif not show_all:

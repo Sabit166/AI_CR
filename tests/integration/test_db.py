@@ -384,7 +384,7 @@ def test_agent_weekly_and_filters_against_real_db():
     second_name = next(f['name'] for f in teacher if f['id'] == fac[1])
     by_teacher = answer(f'next week exams of {second_name} sir', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert 'CT 2' in by_teacher.text and 'Lab Test' in by_teacher.text   # Lab: via course faculty; CT 2: Section B
-    assert 'CT 2 · Section B' in by_teacher.text
+    assert 'CT 2 · Course Section B' in by_teacher.text
 
     exact_title = answer(f'next quantum widgets {tag} exam', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert exact_title.outcome == 'answered' and 'Lab Test' not in exact_title.text   # exact title wins

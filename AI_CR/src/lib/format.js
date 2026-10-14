@@ -70,19 +70,19 @@ export function relativeDayBadge(today, iso) {
   return null
 }
 
-/** 'Section B' (class or course section), 'Sections A & B' (Theoretical, both) or 'Whole class'. */
+/** 'Course Section B' / 'Course Sections A & B' (Theoretical), 'Class Section B' / 'Class Sections A & B' (Sessional). */
 export function sectionText(exam) {
-  if (exam.section) return `Section ${exam.section}`
-  if (exam.course_section) return `Section ${exam.course_section}`
-  return exam.course_type === 'Theoretical' ? 'Sections A & B' : 'Whole class'
+  if (exam.section) return `Class Section ${exam.section}`
+  if (exam.course_section) return `Course Section ${exam.course_section}`
+  return exam.course_type === 'Theoretical' ? 'Course Sections A & B' : 'Class Sections A & B'
 }
 
-/** 'Section A: X · Section B: Y' when the sections have different teachers, else the names. */
+/** 'Course Section A: X · Course Section B: Y' when the sections have different teachers, else the names. */
 export function facultyText(exam) {
   // Per-section teachers, unless the exam carries its own (pre-course-section) faculty picks.
   const bySection = exam.faculty_source === 'exam' ? [] : (exam.section_faculty ?? [])
   if (bySection.length > 1 && new Set(bySection.map((item) => item.name)).size > 1) {
-    return bySection.map((item) => `Section ${item.section}: ${item.name}`).join(' · ')
+    return bySection.map((item) => `Course Section ${item.section}: ${item.name}`).join(' · ')
   }
   return (exam.faculty_names ?? []).join(', ')
 }

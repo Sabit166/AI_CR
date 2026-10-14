@@ -227,14 +227,14 @@ def test_theory_course_sections_in_answers(cache):
             exam_row(3, 2, 'CT 1', '2026-10-19')]
     reply = ask('next week exams for section A', FakeRepo(rows), cache)
     assert '🗓 2 exams' in reply.text   # Section B's CT excluded; both-sections exam kept
-    assert 'CSE-415 · Human Computer Interface\n📝 CT 1 · Section A' in reply.text and 'Ch 4' not in reply.text
+    assert 'CSE-415 · Human Computer Interface\n📝 CT 1 · Course Section A' in reply.text and 'Ch 4' not in reply.text
     assert '👤 Faculty: Nazmul Hasan' in reply.text   # CSE-415 Section A teacher
-    assert 'CSE-427 · Digital Image Processing\n📝 CT 1 · Sections A & B' in reply.text
-    assert 'Section A: Fairooz Tasnia · Section B: Shahriar Sazzad' in reply.text
+    assert 'CSE-427 · Digital Image Processing\n📝 CT 1 · Course Sections A & B' in reply.text
+    assert 'Course Section A: Fairooz Tasnia · Course Section B: Shahriar Sazzad' in reply.text
 
     # A teacher's exams: only the section they take (Fairooz: CSE-415 B, CSE-427 A).
     reply = ask('next exam of Fairooz madam', FakeRepo(rows), cache)
-    assert '📝 CT 1 · Section B' in reply.text and 'Ch 4' in reply.text and 'Ch 1' not in reply.text
+    assert '📝 CT 1 · Course Section B' in reply.text and 'Ch 4' in reply.text and 'Ch 1' not in reply.text
 
 
 def test_all_upcoming_for_a_course(repo, cache):

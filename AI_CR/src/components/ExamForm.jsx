@@ -7,6 +7,8 @@ import { Banner, CheckList, ChipGroup, Field, Spinner, TypeBadge } from './ui.js
 
 const DRAFT_KEY = 'aicr:exam-draft'
 const BOTH = 'both' // Theoretical exam for both course sections (stored as course_section NULL)
+const TOGETHER = 'together' // Sessional exam for both class sections at one time (stored as section NULL)
+const CLASS_SECTIONS = ['A', 'B']
 
 const BLANK = {
   course_id: null,
@@ -28,7 +30,7 @@ function fromExam(exam) {
     exam_type: exam.exam_type,
     exam_date: exam.exam_date,
     exam_time: exam.exam_time ? exam.exam_time.slice(0, 5) : '',
-    section: exam.section ?? '',
+    section: hasSections(exam.course_type) ? (exam.section ?? TOGETHER) : '',
     course_section: hasCourseSections(exam.course_type) ? (exam.course_section ?? BOTH) : '',
     syllabus: exam.syllabus ?? '',
     venue: exam.venue ?? '',
@@ -166,7 +168,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       exam_type: form.exam_type,
       exam_date: form.exam_date,
       exam_time: form.exam_time || null,
-      section: sectioned ? form.section.trim() || null : null,
+      section: sectioned && form.section !== TOGETHER ? form.section : null,
       course_section: theory && form.course_section !== BOTH ? form.course_section : null,
       syllabus: form.syllabus,
       venue: form.venue,
@@ -181,19 +183,17 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
     const next = {}
     if (!form.course_id) next.course_id = 'Select a course.'
     if (form.course_id && !form.exam_type) next.exam_type = 'Select the exam type.'
-    if (theory && !form.course_section) next.course_section = 'Choose the section.'
+    if (theory && !form.course_section) next.course_section = 'Choose the course section.'
+    if (sectioned && !form.section) next.section = 'Choose the class section.'
     if (theory && form.course_section) {
       const missing = sectionTeachers(course, form.course_section).filter((t) => !t.name)
       if (missing.length) {
-        next.course_section = `Section ${missing.map((t) => t.section).join(' and ')} has no course teacher yet. Assign it under Courses first.`
+        next.course_section = `Course section ${missing.map((t) => t.section).join(' and ')} has no course teacher yet. Assign it under Courses first.`
       }
     }
     if (!form.exam_date) next.exam_date = 'Pick the exam date.'
     if (form.notes_link.trim() && !/^https?:\/\/\S+$/i.test(form.notes_link.trim())) {
       next.notes_link = 'Use a full link starting with https://'
-    }
-    if (sectioned && form.section.trim() && !/^[A-Za-z0-9]{1,10}$/.test(form.section.trim())) {
-      next.section = 'Use letters or numbers only, e.g. A. Leave empty for the whole class.'
     }
     setErrors(next)
     return Object.keys(next).length === 0
@@ -254,12 +254,21 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
     ? [
         ...COURSE_SECTIONS.map((s) => ({
           value: s,
-          label: `Section ${s}`,
+          label: `Course section ${s}`,
           sub: course.section_faculty?.[s]?.name ?? 'no teacher yet',
         })),
-        { value: BOTH, label: 'Both sections', sub: 'one record for A & B' },
+        { value: BOTH, label: 'Both course sections', sub: '(questions will come from both sections)' },
       ]
     : []
+  // Class sections sit Sessional tests at different times, so each record is one class section
+  // or both together. A legacy record may carry another section; keep it selectable.
+  const classSectionChoices = [
+    ...CLASS_SECTIONS.map((s) => ({ value: s, label: `Section ${s}` })),
+    ...(form.section && form.section !== TOGETHER && !CLASS_SECTIONS.includes(form.section)
+      ? [{ value: form.section, label: `Section ${form.section}` }]
+      : []),
+    { value: TOGETHER, label: 'Both sections simultaneously' },
+  ]
   const chosenTeachers = theory && form.course_section ? sectionTeachers(course, form.course_section) : []
   const movedSiblings = siblings.filter(
     (s) => s.exam_date !== form.exam_date || (s.exam_time?.slice(0, 5) ?? '') !== form.exam_time,
@@ -312,7 +321,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       {theory ? (
         <>
           <ChipGroup
-            legend="Section"
+            legend="Course section"
             name="exam-course-section"
             options={sectionChoices}
             value={form.course_section}
@@ -325,12 +334,12 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
             {chosenTeachers.length ? (
               chosenTeachers.map((t) => (
                 <p key={t.section} className="readonly-value">
-                  👤 {chosenTeachers.length > 1 ? `Section ${t.section}: ` : ''}
+                  👤 {chosenTeachers.length > 1 ? `Course section ${t.section}: ` : ''}
                   {t.name ?? <span className="muted">not assigned</span>}
                 </p>
               ))
             ) : (
-              <p className="muted">Filled in automatically from the section's course teacher.</p>
+              <p className="muted">Filled in automatically from the course section's teacher.</p>
             )}
           </div>
         </>
@@ -344,7 +353,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
               {s.exam_time ? ` · ${formatTime(s.exam_time)}` : ''}.
             </span>
           ))}{' '}
-          Both sections sit it together
+          Both course sections sit it together
           {movedSiblings.length ? ', so saving will move it to the date and time below.' : '.'}
         </Banner>
       ) : null}
@@ -402,19 +411,14 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       </div>
 
       {sectioned ? (
-        <Field label="Section" htmlFor="exam-section" hint="Leave empty if it's for the whole class." error={errors.section}>
-          <input
-            id="exam-section"
-            type="text"
-            inputMode="text"
-            autoCapitalize="characters"
-            maxLength={10}
-            placeholder="Whole class"
-            value={form.section}
-            onChange={(e) => update('section', e.target.value.toUpperCase())}
-            aria-invalid={Boolean(errors.section)}
-          />
-        </Field>
+        <CheckList
+          legend="Class section"
+          options={classSectionChoices}
+          selected={[form.section]}
+          onToggle={(value) => update('section', form.section === value ? '' : value)}
+          hint="Tests for Section A and Section B are held at different times, so post each one separately."
+          error={errors.section}
+        />
       ) : null}
 
       {course && !theory ? (

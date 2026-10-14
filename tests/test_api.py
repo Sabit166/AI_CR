@@ -273,15 +273,15 @@ def test_preview_uses_bot_formatter(client):
     assert r.status_code == 200
     text = r.json()['text']
     assert 'CSE-415 · Human Computer Interface' in text and 'Ch 1\nCh 2' in text
-    assert '📝 CT 1 · Section B' in text and 'Section X' not in text
+    assert '📝 CT 1 · Course Section B' in text and 'Section X' not in text
     assert '👤 Faculty: Fairooz Tasnia' in text and 'Nazmul' not in text  # Section B's teacher only
 
 
 def test_preview_both_sections_lists_each_teacher(client):
     r = client.post('/api/exams/preview', headers=h(CR_TOKEN), json=VALID_EXAM)
     text = r.json()['text']
-    assert '📝 CT 1 · Sections A & B' in text
-    assert '👤 Faculty: Section A: Nazmul Hasan · Section B: Fairooz Tasnia' in text
+    assert '📝 CT 1 · Course Sections A & B' in text
+    assert '👤 Faculty: Course Section A: Nazmul Hasan · Course Section B: Fairooz Tasnia' in text
 
 
 # --- Webhook -------------------------------------------------------------------
