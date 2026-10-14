@@ -107,9 +107,10 @@ Tests never touch Supabase: `tests/conftest.py` pins harmless connection setting
 file names in `supabase/migrations/`). All 6 legacy rows were copied. The steps below are for
 a fresh project or for reference; step 5 (CR account) still has to be done once.
 
-**Pending:** `20261013150000_course_rules_update.sql` (Theoretical = exactly 2 teachers, Sessional any number,
-no sections on Theoretical exams, Mid enabled). Apply it **before** deploying the backend that expects these rules;
-rollback in `supabase/rollback/20261013150000_course_rules_update_down.sql`.
+`20261013150000_course_rules_update.sql` (Theoretical = exactly 2 teachers, Sessional any number, no sections on
+Theoretical exams, Mid enabled) was applied on 2026-10-14; rollback in
+`supabase/rollback/20261013150000_course_rules_update_down.sql`. The same day all old exam and course data
+(including the legacy `"Exams"` rows) was deleted at the CRs' request, so production started empty for the new term.
 
 `supabase/migrations/20261013031917_dynamic_course_config.sql` is the real change;
 `20261013031653_legacy_exams_baseline.sql` only documents the existing table (a no-op on the live database).
