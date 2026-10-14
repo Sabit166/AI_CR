@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { api, ApiError } from '../lib/api.js'
-import { facultyCountHint, parseCourseCode } from '../lib/academic.js'
+import { COURSE_SECTIONS, hasCourseSections, missingSections, parseCourseCode } from '../lib/academic.js'
 import { Banner, CheckList, Field, Spinner, TypeBadge } from './ui.jsx'
 
-export default function CourseForm({ course, faculty, rules, onSaved, onCancel, onFacultyAdded }) {
+export default function CourseForm({ course, faculty, onSaved, onCancel, onFacultyAdded }) {
   const editing = Boolean(course)
   const [form, setForm] = useState(() => ({
     code: course?.code ?? '',
     title: course?.title ?? '',
     aliases: (course?.aliases ?? []).join(', '),
     faculty_ids: (course?.faculty ?? []).map((f) => f.id),
+    // Theoretical: { A: facultyId, B: facultyId } — the same teacher may take both sections.
+    section_faculty: Object.fromEntries(COURSE_SECTIONS.map((s) => [s, course?.section_faculty?.[s]?.id ?? ''])),
   }))
   const [touched, setTouched] = useState({})
   const [errors, setErrors] = useState({})
@@ -19,8 +21,8 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
   const [addingFaculty, setAddingFaculty] = useState(false)
 
   const parsed = parseCourseCode(form.code)
+  const theory = hasCourseSections(parsed.courseType)
   const count = form.faculty_ids.length
-  const countHint = parsed.courseType ? facultyCountHint(parsed.courseType, count, rules) : null
   const typeWillChange = editing && course.exam_count > 0 && parsed.courseType && parsed.courseType !== course.course_type
 
   function update(field, value) {
@@ -32,6 +34,10 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
     update('faculty_ids', form.faculty_ids.includes(id) ? form.faculty_ids.filter((f) => f !== id) : [...form.faculty_ids, id])
   }
 
+  function setSectionTeacher(section, id) {
+    update('section_faculty', { ...form.section_faculty, [section]: id })
+  }
+
   async function addFaculty() {
     const name = newFaculty.trim().replace(/\s+/g, ' ')
     if (name.length < 2 || addingFaculty) return
@@ -39,7 +45,12 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
     try {
       const created = await api('/api/faculty', { method: 'POST', body: { name } })
       onFacultyAdded(created)
-      update('faculty_ids', [...form.faculty_ids, created.id])
+      if (theory) {
+        const empty = missingSections(form.section_faculty)[0]
+        if (empty) setSectionTeacher(empty, created.id)
+      } else {
+        update('faculty_ids', [...form.faculty_ids, created.id])
+      }
       setNewFaculty('')
     } catch (error) {
       setErrors((current) => ({ ...current, new_faculty: error.message }))
@@ -56,7 +67,8 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
     const next = {}
     if (parsed.error) next.code = parsed.error
     if (form.title.trim().length < 2) next.title = 'Course title is required.'
-    if (countHint && !countHint.ok) next.faculty_ids = `${countHint.text} You selected ${count}.`
+    const missing = theory ? missingSections(form.section_faculty) : []
+    if (missing.length) next.section_faculty = `Choose the course teacher for Section ${missing.join(' and Section ')}.`
     setErrors(next)
     if (Object.keys(next).length) return
 
@@ -68,7 +80,8 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
           code: form.code,
           title: form.title,
           aliases: form.aliases.split(',').map((a) => a.trim()).filter(Boolean),
-          faculty_ids: form.faculty_ids,
+          faculty_ids: theory ? [] : form.faculty_ids,
+          section_faculty: theory ? form.section_faculty : {},
         },
       })
       onSaved(saved, !editing)
@@ -146,15 +159,51 @@ export default function CourseForm({ course, faculty, rules, onSaved, onCancel, 
         <input id="course-aliases" type="text" value={form.aliases} onChange={(e) => update('aliases', e.target.value)} />
       </Field>
 
-      <CheckList
-        legend={`Course teachers (${count} selected)`}
-        options={faculty.map((f) => ({ value: f.id, label: f.name }))}
-        selected={form.faculty_ids}
-        onToggle={toggleFaculty}
-        emptyText="No faculty yet — add the first one below."
-        hint={countHint?.text}
-        error={errors.faculty_ids}
-      />
+      {theory ? (
+        <fieldset className={`check-list${errors.section_faculty ? ' field-invalid' : ''}`}>
+          <legend className="field-label">
+            Course teachers<span className="required" aria-hidden="true"> *</span>
+          </legend>
+          <div className="section-teachers">
+            {COURSE_SECTIONS.map((section) => (
+              <Field key={section} label={`Section ${section}`} htmlFor={`section-${section}-teacher`}>
+                <select
+                  id={`section-${section}-teacher`}
+                  value={form.section_faculty[section]}
+                  onChange={(e) => setSectionTeacher(section, e.target.value ? Number(e.target.value) : '')}
+                  aria-invalid={Boolean(errors.section_faculty && !form.section_faculty[section])}
+                >
+                  <option value="">Choose a teacher…</option>
+                  {faculty.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ))}
+          </div>
+          {errors.section_faculty ? (
+            <p className="field-error" role="alert">
+              {errors.section_faculty}
+            </p>
+          ) : (
+            <p className="field-hint">
+              {faculty.length ? 'One teacher can take both sections.' : 'No faculty yet — add the first one below.'}
+            </p>
+          )}
+        </fieldset>
+      ) : (
+        <CheckList
+          legend={`Course teachers (${count} selected)`}
+          options={faculty.map((f) => ({ value: f.id, label: f.name }))}
+          selected={form.faculty_ids}
+          onToggle={toggleFaculty}
+          emptyText="No faculty yet — add the first one below."
+          hint={parsed.courseType ? 'Select every teacher who takes this course.' : 'Enter the course code first.'}
+          error={errors.faculty_ids}
+        />
+      )}
 
       <div className="inline-add">
         <label htmlFor="new-faculty" className="visually-hidden">

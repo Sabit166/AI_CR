@@ -3,11 +3,9 @@
 
 const INPUT_CODE_RE = /^\s*([A-Za-z]{2,5})[\s_-]*([0-9]{3,4})\s*$/
 
-// Theoretical courses always have exactly two course teachers; Sessional is up to the CR (max null = no limit).
-export const FACULTY_RULES = {
-  Theoretical: { min: 2, max: 2 },
-  Sessional: { min: 0, max: null },
-}
+// Every Theoretical course runs as two course sections with one course teacher each
+// (the same teacher may take both). Course sections are not class sections.
+export const COURSE_SECTIONS = ['A', 'B']
 
 export function parseCourseCode(raw) {
   const text = (raw ?? '').trim()
@@ -30,16 +28,17 @@ export function parseCourseCode(raw) {
   }
 }
 
-export function facultyCountHint(courseType, count, rules = FACULTY_RULES) {
-  const rule = rules[courseType]
-  if (!rule) return null
-  const ok = count >= rule.min && (rule.max == null || count <= rule.max)
-  if (rule.max == null) return { ok, text: 'Select every teacher who takes this course.' }
-  const expected = rule.min === rule.max ? `exactly ${rule.min}` : `${rule.min} to ${rule.max}`
-  return { ok, text: `${courseType} courses have ${expected} course teachers.` }
+/** Course sections still missing a teacher, e.g. ['B']. */
+export function missingSections(sectionFaculty) {
+  return COURSE_SECTIONS.filter((section) => !sectionFaculty?.[section])
 }
 
-/** Theoretical exams (CTs, Mid) are held for every section on the same day. */
+/** Class sections are for Sessional exams only. */
 export function hasSections(courseType) {
   return courseType === 'Sessional'
+}
+
+/** Theoretical courses have course sections A and B; their exams sit both at one time. */
+export function hasCourseSections(courseType) {
+  return courseType === 'Theoretical'
 }

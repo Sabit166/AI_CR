@@ -135,7 +135,8 @@ The dashboard has three tabs at the bottom of the screen:
    - Type the **course code** (e.g. `CSE-415`). Whether it's Theoretical or Sessional is filled in for you.
    - Enter the **course title**.
    - Add any **short names** students use (e.g. *HCI*, *DBMS*) so the assistant recognises them.
-   - Tick the **course teachers**: exactly **2** for a Theoretical course; for a Sessional course, as many as
+   - Choose the **course teachers**. A Theoretical course has two course sections, **A** and **B**: pick the
+     teacher for each. The same teacher can take both sections. For a Sessional course, tick as many teachers as
      take it.
 3. Remove last term's courses with **Remove**. Their old exam records are kept.
 
@@ -149,13 +150,17 @@ The dashboard has three tabs at the bottom of the screen:
    |---|---|
    | CT 1 · CT 2 · Mid · CT 3 | Project Update · Evaluation · Online Exam · Project Presentation · Lab Test |
 
-4. Pick the **date**, and the **time** if you know it.
-5. **Sessional only:** enter the **section**, or leave it empty if it's for the whole class.
-   Theoretical exams are held for every section on the same day, so there's no section to fill in.
-6. Tick the **teacher(s)** taking it (optional).
-7. Write the **syllabus**. Line breaks are kept exactly as you type them.
-8. Optionally open **More details** for venue, a notes link, or remarks.
-9. Tap **Preview** to see exactly what students will receive, then **Save exam**.
+4. **Theoretical:** choose the **section**: **Section A**, **Section B**, or **Both sections**. The
+   section's teacher is filled in for you. Post each section separately when the syllabus differs, or once with
+   **Both sections** when it's the same.
+   **Sessional:** enter the class **section**, or leave it empty if it's for the whole class, and optionally
+   tick the **teacher(s)** taking it.
+5. Choose the **date** from the list, and the **time** (hour and minutes) if you know it.
+   For a Theoretical exam, both sections sit it at the same time. If the other section's exam is already
+   posted, its date and time are filled in for you, and saving a new date or time moves both.
+6. Write the **syllabus**. Line breaks are kept exactly as you type them.
+7. Optionally open **More details** for venue, a notes link, or remarks.
+8. Tap **Preview** to see exactly what students will receive, then **Save exam**.
 
 Students can ask about it — and see it on the exam board — the moment you save.
 
@@ -171,7 +176,7 @@ Students can ask about it — and see it on the exam board — the moment you sa
 - **Nothing is lost if a save fails.** Your entries stay in the form; just tap Save again.
 - **Closed the page by accident?** Your unfinished exam is restored the next time you tap **+ New exam**.
 - **Tapped Save twice?** Only one exam is created.
-- **Two exams of the same type for the same course on the same day** (and, for Sessional, the same section) aren't allowed — edit the existing one instead.
+- **Duplicates aren't allowed** — edit the existing exam instead. A Theoretical course has one CT 1 (CT 2, Mid…) per section; a Sessional course can't have two exams of the same type on the same day for the same section.
 
 ---
 
@@ -228,9 +233,9 @@ Ask the project maintainer to create your account and approve it as a CR.
 </details>
 
 <details>
-<summary><b>Why is there no section option for my CT?</b></summary>
+<summary><b>How do sections work for CTs and the Mid?</b></summary>
 
-CTs and the Mid of Theoretical courses happen on the same day for every section, so they're posted once for the whole class. Sessional exams can differ by section, so those have a section field.
+Theoretical courses have two course sections, A and B, each with its own course teacher (sometimes the same teacher takes both). CTs and the Mid happen at the same time for both sections, but each section's teacher may set a different syllabus, so a CT can be posted for Section A, Section B, or both. Ask for *"section A"* and you'll see your section's exams plus anything posted for both. Sessional exams can be at different times for different class sections.
 </details>
 
 ---

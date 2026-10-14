@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../lib/api.js'
+import { COURSE_SECTIONS, hasCourseSections, missingSections } from '../lib/academic.js'
 import CourseForm from './CourseForm.jsx'
 import { ConfirmDialog, EmptyState, TypeBadge } from './ui.jsx'
 
@@ -43,7 +44,6 @@ export default function CoursesView({ data, notify, reloadCatalog }) {
       <CourseForm
         course={editing === 'new' ? null : editing}
         faculty={faculty}
-        rules={data.config.faculty_rules}
         onSaved={handleSaved}
         onCancel={() => {
           setEditing(null)
@@ -80,9 +80,22 @@ export default function CoursesView({ data, notify, reloadCatalog }) {
                   <strong>{course.code}</strong> <TypeBadge type={course.course_type} />
                 </p>
                 <p className="course-card-title">{course.title}</p>
-                <p className="muted small">
-                  👤 {course.faculty.length ? course.faculty.map((f) => f.name).join(', ') : 'No faculty assigned'}
-                </p>
+                {hasCourseSections(course.course_type) ? (
+                  <>
+                    {COURSE_SECTIONS.map((section) => (
+                      <p key={section} className="muted small">
+                        👤 Section {section}: {course.section_faculty?.[section]?.name ?? 'not assigned'}
+                      </p>
+                    ))}
+                    {missingSections(course.section_faculty).length ? (
+                      <p className="small field-error">Tap Edit to choose the section teachers.</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="muted small">
+                    👤 {course.faculty.length ? course.faculty.map((f) => f.name).join(', ') : 'No faculty assigned'}
+                  </p>
+                )}
                 {course.aliases.length ? <p className="muted small">Also called: {course.aliases.join(', ')}</p> : null}
                 <p className="muted small">
                   {course.exam_count} exam record{course.exam_count === 1 ? '' : 's'}

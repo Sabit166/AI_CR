@@ -185,7 +185,7 @@ def rpc(name: str, args: dict[str, Any]) -> Any:
 # ---------------------------------------------------------------------------
 COURSE_SELECT = (
     'id,code,title,course_type,aliases,faculty_exception_note,archived_at,'
-    'course_faculty(faculty(id,name))'
+    'course_faculty(sections,faculty(id,name))'
 )
 
 
@@ -205,8 +205,12 @@ def fetch_course(course_id: int) -> dict | None:
 
 
 def _flatten_course(row: dict) -> dict:
-    faculty = [link['faculty'] for link in row.pop('course_faculty', []) or [] if link.get('faculty')]
-    row['faculty'] = sorted(faculty, key=lambda f: f['name'].lower())
+    links = [link for link in row.pop('course_faculty', []) or [] if link.get('faculty')]
+    row['faculty'] = sorted((link['faculty'] for link in links), key=lambda f: f['name'].lower())
+    # Theoretical courses: {'A': {id, name}, 'B': {id, name}} (one teacher may hold both); else {}.
+    row['section_faculty'] = {
+        section: link['faculty'] for link in links for section in sorted(link.get('sections') or ())
+    }
     if 'exams' in row:
         exams = row.pop('exams') or [{'count': 0}]
         row['exam_count'] = exams[0].get('count', 0)
@@ -250,7 +254,7 @@ def save_course(
     title: str,
     aliases: list[str],
     faculty_ids: list[int],
-    faculty_exception_note: str | None,
+    section_faculty: dict[str, int],
 ) -> int:
     return rpc('cr_save_course', {
         'p_course_id': course_id,
@@ -258,7 +262,7 @@ def save_course(
         'p_title': title,
         'p_aliases': aliases,
         'p_faculty_ids': faculty_ids,
-        'p_faculty_exception_note': faculty_exception_note,
+        'p_section_faculty': section_faculty,
     })
 
 
@@ -273,7 +277,7 @@ EXAM_DETAIL_FIELDS = (
     'id', 'course_id', 'course_code', 'course_title', 'course_type', 'course_archived',
     'exam_type', 'exam_date', 'exam_time', 'section', 'syllabus', 'venue', 'remarks',
     'notes_link', 'faculty_ids', 'faculty_names', 'faculty_source', 'exam_faculty_ids',
-    'legacy_exam_id', 'created_at', 'updated_at',
+    'legacy_exam_id', 'created_at', 'updated_at', 'course_section', 'section_faculty',
 )
 
 
@@ -286,7 +290,7 @@ class ExamQuery:
     course_ids: tuple[int, ...] | None = None
     exam_types: tuple[str, ...] | None = None
     faculty_ids: tuple[int, ...] | None = None
-    section: str | None = None           # matches that section OR whole-class (NULL) rows
+    section: str | None = None           # class/course section: matches it OR whole-class/both-sections (NULL) rows
     date_from: date | None = None        # inclusive
     date_to: date | None = None          # inclusive
     descending: bool = False
@@ -307,7 +311,9 @@ def build_exam_query_params(query: ExamQuery) -> list[tuple[str, str]]:
     if query.faculty_ids is not None:
         params.append(('faculty_ids', f'ov.{{{",".join(str(int(i)) for i in query.faculty_ids)}}}'))
     if query.section is not None:
-        params.append(('or', f'(section.is.null,section.eq.{_quote_value(query.section)})'))
+        value = _quote_value(query.section)
+        params.append(('and', f'(or(section.is.null,section.eq.{value}),'
+                              f'or(course_section.is.null,course_section.eq.{value}))'))
     if query.date_from is not None:
         params.append(('exam_date', f'gte.{query.date_from.isoformat()}'))
     if query.date_to is not None:
@@ -346,6 +352,7 @@ def save_exam(
     exam_date: date,
     exam_time: dtime | None,
     section: str | None,
+    course_section: str | None,
     syllabus: str | None,
     venue: str | None,
     remarks: str | None,
@@ -361,6 +368,7 @@ def save_exam(
         'p_exam_date': exam_date,
         'p_exam_time': exam_time,
         'p_section': section,
+        'p_course_section': course_section,
         'p_syllabus': syllabus,
         'p_venue': venue,
         'p_remarks': remarks,

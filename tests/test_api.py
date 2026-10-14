@@ -60,7 +60,7 @@ def test_requires_sign_in(client, method, path):
 
 
 @pytest.mark.parametrize('method,path,body', [
-    ('post', '/api/courses', {'code': 'CSE-101', 'title': 'X', 'faculty_ids': [1, 2]}),
+    ('post', '/api/courses', {'code': 'CSE-101', 'title': 'X', 'section_faculty': {'A': 1, 'B': 2}}),
     ('post', '/api/exams', VALID_EXAM),
     ('patch', '/api/exams/7', VALID_EXAM),
     ('delete', '/api/exams/7', None),
@@ -93,38 +93,47 @@ def test_auth_outage_is_503_not_access(client, monkeypatch):
 def test_create_theoretical_course(client, monkeypatch):
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid, 'code': 'CSE-433'})
     r = client.post('/api/courses', headers=h(CR_TOKEN),
-                    json={'code': 'cse 433', 'title': '  Compiler   Design ', 'aliases': ['CD', 'CD', ' '], 'faculty_ids': [1, 2]})
+                    json={'code': 'cse 433', 'title': '  Compiler   Design ', 'aliases': ['CD', 'CD', ' '],
+                          'section_faculty': {'a': 2, 'B': 1}, 'faculty_ids': [5]})
     assert r.status_code == 201, r.text
     kind, kw = client.writes[0]
     assert kw['code'] == 'CSE-433' and kw['title'] == 'Compiler Design' and kw['aliases'] == ['CD']
-    assert kw['faculty_exception_note'] is None
+    # Theoretical teachers are exactly the section teachers; stray faculty_ids are ignored.
+    assert kw['section_faculty'] == {'A': 2, 'B': 1} and kw['faculty_ids'] == [1, 2]
 
 
 @pytest.mark.parametrize('code', ['CSE-433A', '433', 'C-433', ''])
 def test_invalid_course_code_rejected(client, code):
-    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': code, 'title': 'X Y', 'faculty_ids': [1, 2]})
+    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': code, 'title': 'X Y', 'section_faculty': {'A': 1, 'B': 2}})
     assert r.status_code == 422
     assert r.json()['detail']['field'] == 'code'
     assert client.writes == []
 
 
-@pytest.mark.parametrize('code,faculty,ok', [
-    ('CSE-433', [1, 2], True), ('CSE-433', [1], False), ('CSE-433', [1, 2, 3], False), ('CSE-433', [], False),
-    ('CSE-434', [], True), ('CSE-434', [1], True), ('CSE-434', [1, 2], True), ('CSE-434', [1, 2, 3, 4, 5], True),
+@pytest.mark.parametrize('code,body,ok', [
+    ('CSE-433', {'section_faculty': {'A': 1, 'B': 2}}, True),
+    ('CSE-433', {'section_faculty': {'A': 1, 'B': 1}}, True),    # one teacher takes both sections
+    ('CSE-433', {'section_faculty': {'A': 1}}, False),
+    ('CSE-433', {'faculty_ids': [1, 2]}, False),                # no section assignment
+    ('CSE-434', {}, True), ('CSE-434', {'faculty_ids': [1]}, True), ('CSE-434', {'faculty_ids': [1, 2, 3, 4, 5]}, True),
+    ('CSE-434', {'faculty_ids': [1], 'section_faculty': {'A': 1}}, True),  # Sessional: sections dropped
 ])
-def test_faculty_count_rules(client, monkeypatch, code, faculty, ok):
+def test_course_faculty_rules(client, monkeypatch, code, body, ok):
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid})
-    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': code, 'title': 'Course', 'faculty_ids': faculty})
+    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': code, 'title': 'Course', **body})
     assert (r.status_code == 201) == ok, r.text
-    if not ok:
-        assert r.json()['detail']['field'] == 'faculty_ids'
-        assert 'exactly 2' in r.json()['detail']['message']
+    if ok:
+        kw = client.writes[0][1]
+        if code == 'CSE-434':
+            assert kw['section_faculty'] == {} and kw['faculty_ids'] == sorted(set(body.get('faculty_ids', [])))
+    else:
+        assert r.json()['detail']['field'] == 'section_faculty'
+        assert 'Section' in r.json()['detail']['message']
 
 
-def test_theoretical_count_has_no_override(client, monkeypatch):
-    monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: {'id': cid})
+def test_unknown_course_section_rejected(client):
     r = client.post('/api/courses', headers=h(CR_TOKEN), json={
-        'code': 'CSE-433', 'title': 'Course', 'faculty_ids': [1], 'faculty_exception_note': 'Only one teacher'})
+        'code': 'CSE-433', 'title': 'Course', 'section_faculty': {'A': 1, 'C': 2}})
     assert r.status_code == 422 and client.writes == []
 
 
@@ -133,14 +142,14 @@ def test_exception_note_is_ignored(client, monkeypatch):
     r = client.post('/api/courses', headers=h(CR_TOKEN), json={
         'code': 'CSE-434', 'title': 'Course', 'faculty_ids': [1], 'faculty_exception_note': 'old client'})
     assert r.status_code == 201
-    assert client.writes[0][1]['faculty_exception_note'] is None
+    assert 'faculty_exception_note' not in client.writes[0][1]
 
 
 def test_duplicate_course_conflict(client, monkeypatch):
     def dup(**kw):
         raise db_fetch.DatabaseError('dup', code='duplicate', status=409)
     monkeypatch.setattr(db_fetch, 'save_course', dup)
-    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': 'CSE-415', 'title': 'HCI', 'faculty_ids': [1, 2]})
+    r = client.post('/api/courses', headers=h(CR_TOKEN), json={'code': 'CSE-415', 'title': 'HCI', 'section_faculty': {'A': 1, 'B': 2}})
     assert r.status_code == 409
     assert 'already configured' in r.json()['detail']['message']
 
@@ -178,12 +187,42 @@ def test_theoretical_types_accepted(client, exam_type):
     assert r.status_code == 201, r.text
 
 
-def test_theoretical_exam_is_always_whole_class(client):
+def test_theoretical_exam_has_no_class_section(client):
     r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'B'})
     assert r.status_code == 201, r.text
     assert client.writes[0][1]['section'] is None
-    # A section is irrelevant for a Theoretical course, so even an invalid one is not an error.
+    # A class section is irrelevant for a Theoretical course, so even an invalid one is not an error.
     assert client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'A B'}).status_code == 201
+
+
+@pytest.mark.parametrize('course_section,stored', [(None, None), ('', None), ('a', 'A'), ('B', 'B')])
+def test_theoretical_exam_course_section(client, course_section, stored):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_section': course_section})
+    assert r.status_code == 201, r.text
+    kw = client.writes[0][1]
+    assert kw['course_section'] == stored
+    assert kw['faculty_ids'] == []  # teachers come from the course section
+
+
+def test_invalid_course_section_rejected(client):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_section': 'C'})
+    assert r.status_code == 422 and r.json()['detail']['field'] == 'course_section'
+
+
+def test_theoretical_exam_needs_section_teacher(client, monkeypatch):
+    course = {**COURSES[0], 'archived_at': None, 'section_faculty': {'A': COURSES[0]['faculty'][0]}}
+    monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: course)
+    assert client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_section': 'A'}).status_code == 201
+    for course_section in ('B', None):
+        r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_section': course_section})
+        assert r.status_code == 422 and 'Section B' in r.json()['detail']['message']
+
+
+def test_sessional_exam_ignores_course_section(client):
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_id': 3, 'exam_type': 'Lab Test',
+                                                             'faculty_ids': [4], 'course_section': 'A'})
+    assert r.status_code == 201, r.text
+    assert client.writes[0][1]['course_section'] is None
 
 
 def test_sessional_exam_keeps_section(client):
@@ -200,7 +239,8 @@ def test_sessional_types_accepted(client, exam_type):
 
 
 def test_faculty_must_belong_to_course(client):
-    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'faculty_ids': [4]})  # Nafisa not on CSE-415
+    r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_id': 3, 'exam_type': 'Lab Test',
+                                                             'faculty_ids': [1]})  # Nazmul not on CSE-464
     assert r.status_code == 422 and r.json()['detail']['field'] == 'faculty_ids'
 
 
@@ -229,12 +269,19 @@ def test_failed_save_reports_failure(client, monkeypatch):
 
 
 def test_preview_uses_bot_formatter(client):
-    r = client.post('/api/exams/preview', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'a'})
+    r = client.post('/api/exams/preview', headers=h(CR_TOKEN), json={**VALID_EXAM, 'section': 'x', 'course_section': 'b'})
     assert r.status_code == 200
     text = r.json()['text']
     assert 'CSE-415 · Human Computer Interface' in text and 'Ch 1\nCh 2' in text
-    assert 'Section A' not in text  # Theoretical: whole class
-    assert 'Nazmul Hasan' in text and 'Fairooz' not in text
+    assert '📝 CT 1 · Section B' in text and 'Section X' not in text
+    assert '👤 Faculty: Fairooz Tasnia' in text and 'Nazmul' not in text  # Section B's teacher only
+
+
+def test_preview_both_sections_lists_each_teacher(client):
+    r = client.post('/api/exams/preview', headers=h(CR_TOKEN), json=VALID_EXAM)
+    text = r.json()['text']
+    assert '📝 CT 1 · Sections A & B' in text
+    assert '👤 Faculty: Section A: Nazmul Hasan · Section B: Fairooz Tasnia' in text
 
 
 # --- Webhook -------------------------------------------------------------------

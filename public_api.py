@@ -24,7 +24,8 @@ router = APIRouter(prefix='/api/public', tags=['public'])
 PUBLIC_CACHE_SECONDS = float(os.getenv('PUBLIC_CACHE_SECONDS', '30'))
 PUBLIC_EXAM_FIELDS = (
     'id', 'course_id', 'course_code', 'course_title', 'course_type', 'exam_type', 'exam_date',
-    'exam_time', 'section', 'syllabus', 'venue', 'remarks', 'notes_link', 'faculty_names',
+    'exam_time', 'section', 'course_section', 'syllabus', 'venue', 'remarks', 'notes_link', 'faculty_names',
+    'section_faculty',
 )
 
 _cache: dict[tuple, tuple[float, dict]] = {}

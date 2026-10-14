@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import ExamForm from './ExamForm.jsx'
-import { formatDay, formatTime, groupByDay } from '../lib/format.js'
+import { facultyText, formatDay, formatTime, groupByDay, sectionText } from '../lib/format.js'
 import { Banner, ConfirmDialog, EmptyState, LoadingBlock, Spinner } from './ui.jsx'
 
 const PAGE_SIZE = 20
@@ -168,10 +168,10 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
                       <p className="exam-card-meta">
                         <span className="badge badge-type">{exam.exam_type}</span>
                         {formatTime(exam.exam_time) ? <span>{formatTime(exam.exam_time)}</span> : <span className="muted">Time TBA</span>}
-                        <span>{exam.section ? `Section ${exam.section}` : 'Whole class'}</span>
+                        <span>{sectionText(exam)}</span>
                       </p>
                       {exam.syllabus ? <p className="exam-card-syllabus">{exam.syllabus}</p> : <p className="muted small">No syllabus yet</p>}
-                      {exam.faculty_names?.length ? <p className="muted small">👤 {exam.faculty_names.join(', ')}</p> : null}
+                      {facultyText(exam) ? <p className="muted small">👤 {facultyText(exam)}</p> : null}
                     </div>
                     <div className="card-actions">
                       <button type="button" className="btn btn-ghost btn-small" onClick={() => setEditing(exam)}>

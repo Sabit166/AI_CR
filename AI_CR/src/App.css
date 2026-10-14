@@ -374,6 +374,7 @@
 
 .field input,
 .field textarea,
+.field select,
 .inline-add input {
   width: 100%;
   min-height: 48px;
@@ -388,7 +389,28 @@
 
 .field-invalid input,
 .field-invalid textarea,
-.field input[aria-invalid='true'] { border-color: var(--danger); }
+.field-invalid select,
+.field input[aria-invalid='true'],
+.field select[aria-invalid='true'] { border-color: var(--danger); }
+
+.field select:disabled { opacity: 0.6; }
+
+.time-selects {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 8px;
+}
+
+.section-teachers {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 420px) {
+  .section-teachers { grid-template-columns: 1fr 1fr; }
+}
+
+.sibling-line { display: block; }
 
 .field-hint { font-size: 0.875rem; color: var(--muted); }
 .field-error { font-size: 0.875rem; color: var(--danger); font-weight: 600; }

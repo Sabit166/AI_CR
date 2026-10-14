@@ -47,17 +47,17 @@ F_SHAHRIAR_K = {'id': 6, 'name': 'Shahriar Kabir'}
 
 COURSES = [
     {'id': 1, 'code': 'CSE-415', 'title': 'Human Computer Interface', 'course_type': 'Theoretical',
-     'aliases': [], 'faculty': [F_FAIROOZ, F_NAZMUL]},
+     'aliases': [], 'faculty': [F_FAIROOZ, F_NAZMUL], 'section_faculty': {'A': F_NAZMUL, 'B': F_FAIROOZ}},
     {'id': 2, 'code': 'CSE-427', 'title': 'Digital Image Processing', 'course_type': 'Theoretical',
-     'aliases': ['DIP'], 'faculty': [F_FAIROOZ, F_SHAHRIAR]},
+     'aliases': ['DIP'], 'faculty': [F_FAIROOZ, F_SHAHRIAR], 'section_faculty': {'A': F_FAIROOZ, 'B': F_SHAHRIAR}},
     {'id': 3, 'code': 'CSE-464', 'title': 'Software Development Project II', 'course_type': 'Sessional',
-     'aliases': ['Software Development Project-2'], 'faculty': [F_ARIF, F_NAFISA, F_SHAHRIAR]},
+     'aliases': ['Software Development Project-2'], 'faculty': [F_ARIF, F_NAFISA, F_SHAHRIAR], 'section_faculty': {}},
     {'id': 4, 'code': 'CSE-305', 'title': 'Database Management Systems', 'course_type': 'Theoretical',
-     'aliases': ['DBMS'], 'faculty': [F_NAZMUL, F_SHAHRIAR_K]},
+     'aliases': ['DBMS'], 'faculty': [F_NAZMUL, F_SHAHRIAR_K], 'section_faculty': {'A': F_NAZMUL, 'B': F_SHAHRIAR_K}},
     {'id': 5, 'code': 'CSE-306', 'title': 'Database Management Systems Lab', 'course_type': 'Sessional',
-     'aliases': [], 'faculty': [F_NAZMUL, F_SHAHRIAR_K, F_ARIF]},
+     'aliases': [], 'faculty': [F_NAZMUL, F_SHAHRIAR_K, F_ARIF], 'section_faculty': {}},
     {'id': 6, 'code': 'GEEM-433', 'title': 'Ethics and Morality', 'course_type': 'Theoretical',
-     'aliases': [], 'faculty': [F_ARIF, F_FAIROOZ]},
+     'aliases': [], 'faculty': [F_ARIF, F_FAIROOZ], 'section_faculty': {'A': F_ARIF, 'B': F_FAIROOZ}},
 ]
 
 
@@ -84,17 +84,25 @@ def clock_at(iso: str) -> dr.Clock:
 
 
 def exam_row(id, course_id, exam_type, exam_date, exam_time='09:00:00', section=None, syllabus=None,
-             faculty_ids=None, venue=None, notes_link=None, remarks=None):
+             faculty_ids=None, venue=None, notes_link=None, remarks=None, course_section=None):
+    """Mirrors public.exam_details: a Theoretical exam's faculty are its course section(s)' teachers."""
     course = next(c for c in COURSES if c['id'] == course_id)
-    faculty = course['faculty'] if faculty_ids is None else [
-        f for f in course['faculty'] if f['id'] in faculty_ids]
+    by_section = [{'section': s, 'name': f['name'], 'id': f['id']} for s, f in sorted(course['section_faculty'].items())
+                  if course_section in (None, s)]
+    if by_section:
+        faculty = sorted({i['id']: {'id': i['id'], 'name': i['name']} for i in by_section}.values(), key=lambda f: f['name'])
+    elif faculty_ids is None:
+        faculty = course['faculty']
+    else:
+        faculty = [f for f in course['faculty'] if f['id'] in faculty_ids]
     return {
         'id': id, 'course_id': course_id, 'course_code': course['code'], 'course_title': course['title'],
         'course_type': course['course_type'], 'course_archived': False, 'exam_type': exam_type,
-        'exam_date': exam_date, 'exam_time': exam_time, 'section': section, 'syllabus': syllabus,
+        'exam_date': exam_date, 'exam_time': exam_time, 'section': section, 'course_section': course_section,
+        'section_faculty': [{'section': i['section'], 'name': i['name']} for i in by_section], 'syllabus': syllabus,
         'venue': venue, 'remarks': remarks, 'notes_link': notes_link,
         'faculty_ids': [f['id'] for f in faculty], 'faculty_names': [f['name'] for f in faculty],
-        'faculty_source': 'exam' if faculty_ids is not None else 'course',
+        'faculty_source': 'exam' if faculty_ids is not None and not by_section else 'course',
         'exam_faculty_ids': faculty_ids or [], 'legacy_exam_id': None,
         'created_at': '2026-10-01T00:00:00Z', 'updated_at': '2026-10-01T00:00:00Z',
     }
@@ -118,7 +126,8 @@ class FakeRepo:
                 continue
             if q.faculty_ids is not None and not set(row['faculty_ids']) & set(q.faculty_ids):
                 continue
-            if q.section is not None and row['section'] not in (None, q.section):
+            if q.section is not None and (row['section'] not in (None, q.section)
+                                          or row.get('course_section') not in (None, q.section)):
                 continue
             d = date.fromisoformat(row['exam_date'])
             if q.date_from is not None and d < q.date_from:

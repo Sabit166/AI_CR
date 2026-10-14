@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api.js'
-import { hasSections } from '../lib/academic.js'
+import { COURSE_SECTIONS, hasCourseSections, hasSections } from '../lib/academic.js'
+import { formatDay, formatTime, sectionText } from '../lib/format.js'
+import { dateOptions, hourOptions, joinTime, minuteOptions, splitTime } from '../lib/pickers.js'
 import { Banner, CheckList, ChipGroup, Field, Spinner, TypeBadge } from './ui.jsx'
 
 const DRAFT_KEY = 'aicr:exam-draft'
+const BOTH = 'both' // Theoretical exam for both course sections (stored as course_section NULL)
 
 const BLANK = {
   course_id: null,
@@ -11,6 +14,7 @@ const BLANK = {
   exam_date: '',
   exam_time: '',
   section: '',
+  course_section: '',
   syllabus: '',
   venue: '',
   remarks: '',
@@ -25,6 +29,7 @@ function fromExam(exam) {
     exam_date: exam.exam_date,
     exam_time: exam.exam_time ? exam.exam_time.slice(0, 5) : '',
     section: exam.section ?? '',
+    course_section: hasCourseSections(exam.course_type) ? (exam.course_section ?? BOTH) : '',
     syllabus: exam.syllabus ?? '',
     venue: exam.venue ?? '',
     remarks: exam.remarks ?? '',
@@ -46,6 +51,14 @@ function newRequestId() {
   return crypto.randomUUID()
 }
 
+/** Teachers of the chosen course section(s): [{ section: 'A', name }]. */
+function sectionTeachers(course, courseSection) {
+  return COURSE_SECTIONS.filter((s) => courseSection === BOTH || courseSection === s).map((s) => ({
+    section: s,
+    name: course?.section_faculty?.[s]?.name ?? null,
+  }))
+}
+
 export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
   const editing = Boolean(exam)
   const [restoredDraft] = useState(() => (editing ? null : loadDraft()))
@@ -55,30 +68,71 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
   const [saving, setSaving] = useState(false)
   const [requestId, setRequestId] = useState(newRequestId)
   const [preview, setPreview] = useState({ loading: false, text: '', error: '' })
+  const [siblingState, setSiblingState] = useState({ key: null, exams: [] })
 
   // Editing an exam whose course was later removed: keep it selectable for this record only.
   const courseOptions = useMemo(() => {
     if (!exam || courses.some((c) => c.id === exam.course_id)) return courses
     return [
       ...courses,
-      { id: exam.course_id, code: exam.course_code, title: exam.course_title, course_type: exam.course_type, faculty: [], archived: true },
+      {
+        id: exam.course_id,
+        code: exam.course_code,
+        title: exam.course_title,
+        course_type: exam.course_type,
+        faculty: [],
+        section_faculty: {},
+        archived: true,
+      },
     ]
   }, [courses, exam])
 
   const course = courseOptions.find((c) => c.id === form.course_id) ?? null
   const sectioned = course ? hasSections(course.course_type) : false
+  const theory = course ? hasCourseSections(course.course_type) : false
 
   const examTypes = useMemo(() => {
     if (!course) return []
     const allowed = [...(config.exam_types[course.course_type] ?? [])]
-    // A legacy record (e.g. "Mid") can be edited without being forced to change type.
+    // A legacy record can be edited without being forced to change type.
     if (exam && exam.course_id === course.id && !allowed.includes(exam.exam_type)) allowed.push(exam.exam_type)
     return allowed
   }, [course, config, exam])
 
+  const dates = useMemo(() => dateOptions(config.today, { include: form.exam_date }), [config.today, form.exam_date])
+  const time = splitTime(form.exam_time)
+  const hours = useMemo(() => hourOptions(form.exam_time), [form.exam_time])
+  const minutes = useMemo(() => minuteOptions(form.exam_time), [form.exam_time])
+
   useEffect(() => {
     if (!editing) sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form))
   }, [form, editing])
+
+  // Both course sections sit a Theoretical exam together: find the other section's record of this exam.
+  const siblingKey = theory && form.course_id && form.exam_type ? `${form.course_id}|${form.exam_type}` : null
+  const siblings = siblingState.key === siblingKey ? siblingState.exams : []
+  useEffect(() => {
+    if (!siblingKey) return undefined
+    let cancelled = false
+    api(`/api/exams?scope=upcoming&course_id=${form.course_id}&limit=100`)
+      .then(({ exams }) => {
+        if (cancelled) return
+        const found = exams.filter((e) => e.exam_type === form.exam_type && e.id !== exam?.id)
+        setSiblingState({ key: siblingKey, exams: found })
+        // New exam with no date yet: start from the other section's date and time.
+        if (!editing && found.length) {
+          setForm((current) =>
+            current.exam_date
+              ? current
+              : { ...current, exam_date: found[0].exam_date, exam_time: found[0].exam_time?.slice(0, 5) ?? '' },
+          )
+        }
+      })
+      .catch(() => !cancelled && setSiblingState({ key: siblingKey, exams: [] }))
+    return () => {
+      cancelled = true
+    }
+  }, [siblingKey, form.course_id, form.exam_type, editing, exam?.id])
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -97,6 +151,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       exam_type: allowed.includes(current.exam_type) ? current.exam_type : '',
       faculty_ids: current.faculty_ids.filter((id) => facultyIds.has(id)),
       section: hasSections(next.course_type) ? current.section : '',
+      course_section: hasCourseSections(next.course_type) ? current.course_section : '',
     }))
     setErrors({})
   }
@@ -112,11 +167,12 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
       exam_date: form.exam_date,
       exam_time: form.exam_time || null,
       section: sectioned ? form.section.trim() || null : null,
+      course_section: theory && form.course_section !== BOTH ? form.course_section : null,
       syllabus: form.syllabus,
       venue: form.venue,
       remarks: form.remarks,
       notes_link: form.notes_link.trim(),
-      faculty_ids: form.faculty_ids,
+      faculty_ids: theory ? [] : form.faculty_ids,
       ...(editing ? {} : { client_request_id: requestId }),
     }
   }
@@ -125,6 +181,13 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
     const next = {}
     if (!form.course_id) next.course_id = 'Select a course.'
     if (form.course_id && !form.exam_type) next.exam_type = 'Select the exam type.'
+    if (theory && !form.course_section) next.course_section = 'Choose the section.'
+    if (theory && form.course_section) {
+      const missing = sectionTeachers(course, form.course_section).filter((t) => !t.name)
+      if (missing.length) {
+        next.course_section = `Section ${missing.map((t) => t.section).join(' and ')} has no course teacher yet. Assign it under Courses first.`
+      }
+    }
     if (!form.exam_date) next.exam_date = 'Pick the exam date.'
     if (form.notes_link.trim() && !/^https?:\/\/\S+$/i.test(form.notes_link.trim())) {
       next.notes_link = 'Use a full link starting with https://'
@@ -187,6 +250,21 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
     sub: c.archived ? 'removed course' : c.course_type,
   }))
 
+  const sectionChoices = course
+    ? [
+        ...COURSE_SECTIONS.map((s) => ({
+          value: s,
+          label: `Section ${s}`,
+          sub: course.section_faculty?.[s]?.name ?? 'no teacher yet',
+        })),
+        { value: BOTH, label: 'Both sections', sub: 'one record for A & B' },
+      ]
+    : []
+  const chosenTeachers = theory && form.course_section ? sectionTeachers(course, form.course_section) : []
+  const movedSiblings = siblings.filter(
+    (s) => s.exam_date !== form.exam_date || (s.exam_time?.slice(0, 5) ?? '') !== form.exam_time,
+  )
+
   return (
     <form className="card form-card" onSubmit={submit} noValidate aria-labelledby="exam-form-title">
       <div className="form-head">
@@ -231,19 +309,95 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
         />
       ) : null}
 
+      {theory ? (
+        <>
+          <ChipGroup
+            legend="Section"
+            name="exam-course-section"
+            options={sectionChoices}
+            value={form.course_section}
+            onChange={(value) => update('course_section', value)}
+            error={errors.course_section}
+            required
+          />
+          <div className="readonly-field" aria-live="polite">
+            <span className="field-label">Faculty</span>
+            {chosenTeachers.length ? (
+              chosenTeachers.map((t) => (
+                <p key={t.section} className="readonly-value">
+                  👤 {chosenTeachers.length > 1 ? `Section ${t.section}: ` : ''}
+                  {t.name ?? <span className="muted">not assigned</span>}
+                </p>
+              ))
+            ) : (
+              <p className="muted">Filled in automatically from the section's course teacher.</p>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {theory && siblings.length ? (
+        <Banner kind="info">
+          {siblings.map((s) => (
+            <span key={s.id} className="sibling-line">
+              {sectionText(s)}'s {s.exam_type} is on {formatDay(s.exam_date)}
+              {s.exam_time ? ` · ${formatTime(s.exam_time)}` : ''}.
+            </span>
+          ))}{' '}
+          Both sections sit it together
+          {movedSiblings.length ? ', so saving will move it to the date and time below.' : '.'}
+        </Banner>
+      ) : null}
+
       <div className="field-row">
         <Field label="Date" htmlFor="exam-date" error={errors.exam_date} required>
-          <input
+          <select
             id="exam-date"
-            type="date"
             value={form.exam_date}
             onChange={(e) => update('exam_date', e.target.value)}
             aria-invalid={Boolean(errors.exam_date)}
             required
-          />
+          >
+            <option value="">Choose a date…</option>
+            {dates.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
         </Field>
         <Field label="Time" htmlFor="exam-time" hint="Optional" error={errors.exam_time}>
-          <input id="exam-time" type="time" value={form.exam_time} onChange={(e) => update('exam_time', e.target.value)} />
+          <div className="time-selects">
+            <select
+              id="exam-time"
+              value={time.hour}
+              onChange={(e) => update('exam_time', joinTime(e.target.value, time.minute))}
+            >
+              <option value="">Not set</option>
+              {hours.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Minutes"
+              value={time.minute}
+              disabled={!time.hour}
+              onChange={(e) => update('exam_time', joinTime(time.hour, e.target.value))}
+            >
+              {time.hour ? null : <option value="">:00</option>}
+              {minutes.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </Field>
       </div>
 
@@ -263,7 +417,7 @@ export default function ExamForm({ courses, config, exam, onSaved, onCancel }) {
         </Field>
       ) : null}
 
-      {course ? (
+      {course && !theory ? (
         <CheckList
           legend="Faculty for this exam"
           options={course.faculty.map((f) => ({ value: f.id, label: f.name }))}

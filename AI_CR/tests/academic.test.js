@@ -2,7 +2,7 @@
 // Same vectors as tests/test_academic.py (Python) and the SQL parity test.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseCourseCode, facultyCountHint, hasSections } from '../src/lib/academic.js'
+import { parseCourseCode, missingSections, hasSections, hasCourseSections } from '../src/lib/academic.js'
 
 const VECTORS = [
   ['CSE-415', 'CSE-415', 'Theoretical'],
@@ -31,15 +31,16 @@ for (const [raw, code, courseType] of VECTORS) {
   })
 }
 
-test('faculty count hints', () => {
-  assert.equal(facultyCountHint('Theoretical', 2).ok, true)
-  assert.equal(facultyCountHint('Theoretical', 3).ok, false)
-  assert.equal(facultyCountHint('Theoretical', 0).ok, false)
-  for (const count of [0, 1, 2, 4, 7]) assert.equal(facultyCountHint('Sessional', count).ok, true)
-  assert.match(facultyCountHint('Theoretical', 1).text, /exactly 2/)
+test('course sections each need a teacher; one teacher may take both', () => {
+  assert.deepEqual(missingSections({ A: 1, B: 2 }), [])
+  assert.deepEqual(missingSections({ A: 1, B: 1 }), [])
+  assert.deepEqual(missingSections({ A: 1, B: '' }), ['B'])
+  assert.deepEqual(missingSections(undefined), ['A', 'B'])
 })
 
-test('only Sessional exams have sections', () => {
+test('class sections for Sessional, course sections for Theoretical', () => {
   assert.equal(hasSections('Sessional'), true)
   assert.equal(hasSections('Theoretical'), false)
+  assert.equal(hasCourseSections('Theoretical'), true)
+  assert.equal(hasCourseSections('Sessional'), false)
 })

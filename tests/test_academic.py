@@ -38,13 +38,25 @@ def test_parity_uses_number_not_ascii():
     assert academic.course_type_for_code('cse-415') is None  # only canonical codes are typed
 
 
-@pytest.mark.parametrize('course_type,count,ok', [
-    ('Theoretical', 2, True), ('Theoretical', 1, False), ('Theoretical', 3, False),
-    ('Theoretical', 0, False),
-    ('Sessional', 0, True), ('Sessional', 1, True), ('Sessional', 2, True), ('Sessional', 5, True), ('Sessional', 9, True),
+@pytest.mark.parametrize('course_type,section_faculty,ok', [
+    ('Theoretical', {'A': 1, 'B': 2}, True),
+    ('Theoretical', {'A': 1, 'B': 1}, True),    # one teacher may take both course sections
+    ('Theoretical', {'A': 1}, False),
+    ('Theoretical', {}, False),
+    ('Sessional', {}, True),
+    ('Sessional', {'A': 1}, False),
 ])
-def test_faculty_count_rules(course_type, count, ok):
-    assert (academic.faculty_count_error(course_type, count) is None) == ok
+def test_section_faculty_rules(course_type, section_faculty, ok):
+    assert (academic.section_faculty_error(course_type, section_faculty) is None) == ok
+
+
+def test_course_section_normalization():
+    assert academic.normalize_course_section(None) is None
+    assert academic.normalize_course_section(' ') is None
+    assert academic.normalize_course_section(' b ') == 'B'
+    with pytest.raises(ValueError):
+        academic.normalize_course_section('C')
+    assert academic.has_course_sections('Theoretical') and not academic.has_course_sections('Sessional')
 
 
 def test_section_normalization():

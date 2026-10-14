@@ -18,12 +18,11 @@ COURSE_TYPES = (THEORETICAL, SESSIONAL)
 _INPUT_CODE_RE = re.compile(r'^\s*([A-Za-z]{2,5})[\s_-]*([0-9]{3,4})\s*$')
 CANONICAL_CODE_RE = re.compile(r'^[A-Z]{2,5}-[0-9]{3,4}$')
 
-# Faculty counts per course type (inclusive; None = no upper limit).
-# Theoretical courses always have exactly two course teachers; Sessional is up to the CR.
-FACULTY_COUNT_RULES: dict[str, tuple[int, int | None]] = {
-    THEORETICAL: (2, 2),
-    SESSIONAL: (0, None),
-}
+# Every Theoretical course runs as two course sections. Each has one course teacher;
+# the same teacher may take both. Course sections are not class sections: a
+# Theoretical exam is posted for course section A, B or both (None), never for a
+# class section. Sessional courses have no course sections and any number of teachers.
+COURSE_SECTIONS = ('A', 'B')
 
 SECTION_RE = re.compile(r'^[A-Z0-9]{1,10}$')
 
@@ -69,16 +68,32 @@ def parse_course_code(raw: str | None) -> CourseCode:
     return CourseCode(code, course_type_for_code(code), None)
 
 
-def faculty_count_error(course_type: str, count: int) -> str | None:
-    low, high = FACULTY_COUNT_RULES[course_type]
-    if count >= low and (high is None or count <= high):
+def section_faculty_error(course_type: str, section_faculty: dict[str, int]) -> str | None:
+    """Theoretical: a teacher for every course section. Sessional: no course sections."""
+    if course_type == SESSIONAL:
+        return 'Sessional courses do not have course sections.' if section_faculty else None
+    missing = [s for s in COURSE_SECTIONS if not section_faculty.get(s)]
+    if missing:
+        return f'Choose the course teacher for Section {" and Section ".join(missing)}.'
+    return None
+
+
+def has_course_sections(course_type: str) -> bool:
+    return course_type == THEORETICAL
+
+
+def normalize_course_section(raw: str | None) -> str | None:
+    """'' / None -> None (both course sections); ' a ' -> 'A'. Raises ValueError otherwise."""
+    if raw is None or not raw.strip():
         return None
-    expected = f'exactly {low}' if low == high else f'at least {low}' if high is None else f'{low} to {high}'
-    return f'{course_type} courses need {expected} course teachers (selected {count}).'
+    section = raw.strip().upper()
+    if section not in COURSE_SECTIONS:
+        raise ValueError('Course section must be A or B. Leave it empty for both sections.')
+    return section
 
 
 def has_sections(course_type: str) -> bool:
-    """Theoretical exams (CTs, Mid) are held for every section on the same day."""
+    """Class sections are for Sessional exams only (Theoretical exams use course sections)."""
     return course_type == SESSIONAL
 
 

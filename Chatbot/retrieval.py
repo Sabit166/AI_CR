@@ -20,18 +20,19 @@ from .resolver import CourseResolution, FacultyResolution, resolve_courses, reso
 # so later records are never dropped silently.
 LIST_LIMIT = 60
 
-BASE_FIELDS = ('id', 'course_code', 'course_title', 'course_type', 'exam_type', 'exam_date', 'exam_time', 'section')
+BASE_FIELDS = ('id', 'course_code', 'course_title', 'course_type', 'exam_type', 'exam_date', 'exam_time', 'section',
+               'course_section')
 FIELD_COLUMNS = {
     'date': (),
     'time': (),
     'section': (),
     'syllabus': ('syllabus',),
-    'faculty': ('faculty_names', 'faculty_source'),
+    'faculty': ('faculty_names', 'faculty_source', 'section_faculty'),
     'venue': ('venue',),
     'notes_link': ('notes_link',),
     'remarks': ('remarks',),
 }
-SUMMARY_FIELDS = ('syllabus', 'faculty_names', 'faculty_source', 'venue', 'remarks', 'notes_link')
+SUMMARY_FIELDS = ('syllabus', 'faculty_names', 'faculty_source', 'section_faculty', 'venue', 'remarks', 'notes_link')
 
 
 class ExamRepository(Protocol):

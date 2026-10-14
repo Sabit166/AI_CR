@@ -79,15 +79,23 @@ def faculty(n: int) -> list[int]:
     return [db_fetch.create_faculty(f'Teacher {tag} {i}')['id'] for i in range(n)]
 
 
-def course(code: str, title: str, faculty_ids: list[int], aliases=(), note=None) -> int:
-    return db_fetch.save_course(course_id=None, code=code, title=title, aliases=list(aliases),
-                                faculty_ids=faculty_ids, faculty_exception_note=note)
+def default_sections(code: str, faculty_ids: list[int]) -> dict[str, int]:
+    """Theoretical codes (odd last digit): Section A = first teacher, Section B = last."""
+    if not code[-1].isdigit() or int(code[-1]) % 2 == 0 or not faculty_ids:
+        return {}
+    return {'A': faculty_ids[0], 'B': faculty_ids[-1]}
 
 
-def exam(course_id, exam_type, day, *, time=None, section=None, syllabus=None, faculty_ids=(), request_id=None, exam_id=None):
+def course(code: str, title: str, faculty_ids: list[int], aliases=(), sections=None) -> int:
+    return db_fetch.save_course(course_id=None, code=code, title=title, aliases=list(aliases), faculty_ids=faculty_ids,
+                                section_faculty=default_sections(code, faculty_ids) if sections is None else sections)
+
+
+def exam(course_id, exam_type, day, *, time=None, section=None, course_section=None, syllabus=None, faculty_ids=(),
+         request_id=None, exam_id=None):
     return db_fetch.save_exam(exam_id=exam_id, course_id=course_id, exam_type=exam_type, exam_date=day, exam_time=time,
-                              section=section, syllabus=syllabus, venue=None, remarks=None, notes_link=None,
-                              faculty_ids=list(faculty_ids), client_request_id=request_id, user_id=None)
+                              section=section, course_section=course_section, syllabus=syllabus, venue=None, remarks=None,
+                              notes_link=None, faculty_ids=list(faculty_ids), client_request_id=request_id, user_id=None)
 
 
 def far_week(offset_weeks: int) -> date:
@@ -131,7 +139,7 @@ def test_legacy_backfill():
     ('POST', 'courses', {'code': 'HACK-101', 'title': 'Hack'}),
     ('DELETE', 'exams?id=gt.0', None),
     ('POST', 'rpc/cr_save_course', {'p_course_id': None, 'p_code': 'HACK-101', 'p_title': 'Hack', 'p_aliases': [],
-                                    'p_faculty_ids': [], 'p_faculty_exception_note': 'x' * 5}),
+                                    'p_faculty_ids': [], 'p_section_faculty': {}}),
     ('POST', 'rpc/cr_remove_course', {'p_course_id': 1}),
 ])
 def test_public_roles_cannot_read_or_write(role, method, path, body):
@@ -150,22 +158,33 @@ def test_course_type_derived_and_locked():
         db_fetch._rest('PATCH', 'courses', [('id', f'eq.{theory}')], {'course_type': 'Sessional'})
 
 
-def test_db_rejects_bad_codes_and_counts_even_without_backend_validation():
+def test_db_enforces_course_sections_even_without_backend_validation():
     p = prefix()
     with pytest.raises(db_fetch.DatabaseError) as err:
         course(f'{p}-301A', 'Bad', faculty(2))
     assert err.value.code == 'invalid_course_code'
-    for count in (0, 1, 3):
+    one, two = faculty(2)
+    for bad in ({}, {'A': one}, {'B': two}, {'A': one, 'C': two}):
         with pytest.raises(db_fetch.DatabaseError) as err:
-            course(f'{p}-301', 'Theory', faculty(count))
-        assert err.value.code == 'faculty_count'
-    with pytest.raises(db_fetch.DatabaseError) as err:  # no exception-note override any more
-        course(f'{p}-301', 'With note', faculty(1), note='Single teacher this term')
-    assert err.value.code == 'faculty_count'
-    # Sessional: any number of teachers
+            course(f'{p}-301', 'Theory', [one, two], sections=bad)
+        assert err.value.code == 'faculty_sections', bad
+    # One teacher may take both course sections; faculty_ids are ignored for Theoretical courses.
+    cid = course(f'{p}-301', 'Theory', [two], sections={'A': one, 'B': one})
+    saved = db_fetch.fetch_course(cid)
+    assert [f['id'] for f in saved['faculty']] == [one]
+    assert {s: f['id'] for s, f in saved['section_faculty'].items()} == {'A': one, 'B': one}
+    # Re-assigning sections replaces the teachers.
+    db_fetch.save_course(course_id=cid, code=f'{p}-301', title='Theory', aliases=[], faculty_ids=[],
+                         section_faculty={'A': two, 'B': one})
+    saved = db_fetch.fetch_course(cid)
+    assert {s: f['id'] for s, f in saved['section_faculty'].items()} == {'A': two, 'B': one}
+    # Sessional: any number of teachers, no course sections.
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        course(f'{p}-302', 'Lab', [one], sections={'A': one})
+    assert err.value.code == 'faculty_sections'
     for i, count in enumerate((0, 1, 2, 5)):
-        cid = course(f'{p}-{302 + 2 * i}', 'Lab', faculty(count), note='ignored')
-        assert db_fetch.fetch_course(cid)['faculty_exception_note'] is None
+        cid = course(f'{p}-{304 + 2 * i}', 'Lab', faculty(count))
+        assert db_fetch.fetch_course(cid)['section_faculty'] == {}
 
 
 def test_duplicate_active_course_rejected_but_archived_code_reusable():
@@ -199,21 +218,22 @@ def test_code_change_that_flips_type_is_blocked_once_exams_exist():
     exam(cid, 'CT 1', far_week(3))
     with pytest.raises(db_fetch.DatabaseError) as err:
         db_fetch.save_course(course_id=cid, code=f'{p}-302', title='Theory', aliases=[], faculty_ids=fac,
-                             faculty_exception_note='renamed')
+                             section_faculty={})
     assert err.value.code == 'course_type_locked'
     # Same-type rename is fine
-    db_fetch.save_course(course_id=cid, code=f'{p}-305', title='Renamed', aliases=[], faculty_ids=fac, faculty_exception_note=None)
+    db_fetch.save_course(course_id=cid, code=f'{p}-305', title='Renamed', aliases=[], faculty_ids=[],
+                         section_faculty=default_sections(f'{p}-305', fac))
     assert db_fetch.fetch_course(cid)['code'] == f'{p}-305'
 
 
 def test_faculty_removal_rules():
     p = prefix()
     fac = faculty(2)
-    cid = course(f'{p}-301', 'Theory', fac)
+    cid = course(f'{p}-302', 'Lab', fac)
     with pytest.raises(db_fetch.DatabaseError) as err:
         db_fetch.remove_faculty(fac[0])
     assert err.value.code == 'in_use'
-    exam(cid, 'CT 1', far_week(4), faculty_ids=[fac[0]])
+    exam(cid, 'Lab Test', far_week(4), faculty_ids=[fac[0]])
     db_fetch.remove_course(cid)
     assert db_fetch.remove_faculty(fac[0]) == 'archived'      # still referenced by history
     assert db_fetch.remove_faculty(faculty(1)[0]) == 'deleted'
@@ -236,9 +256,9 @@ def test_exam_type_must_match_course_type_at_db_level():
 
 def test_exam_faculty_must_belong_to_course():
     p = prefix()
-    cid = course(f'{p}-301', 'Theory', faculty(2))
+    cid = course(f'{p}-302', 'Lab', faculty(2))
     with pytest.raises(db_fetch.DatabaseError) as err:
-        exam(cid, 'CT 1', far_week(6), faculty_ids=faculty(1))
+        exam(cid, 'Lab Test', far_week(6), faculty_ids=faculty(1))
     assert err.value.code == 'invalid_faculty'
 
 
@@ -254,8 +274,11 @@ def test_double_submit_creates_one_row_and_duplicates_are_rejected():
     with pytest.raises(db_fetch.DatabaseError) as err:
         exam(cid, 'CT 1', far_week(7))  # new submission, same course/type/date/section
     assert err.value.code == 'duplicate'
-    with pytest.raises(db_fetch.DatabaseError) as err:  # Theoretical: the section is dropped, so still a duplicate
+    with pytest.raises(db_fetch.DatabaseError) as err:  # Theoretical: the class section is dropped, so still a duplicate
         exam(cid, 'CT 1', far_week(7), section='B')
+    assert err.value.code == 'duplicate'
+    with pytest.raises(db_fetch.DatabaseError) as err:  # Theoretical: one CT 1 per course section, whatever the date
+        exam(cid, 'CT 1', far_week(7) + timedelta(days=3), course_section='A')
     assert err.value.code == 'duplicate'
     lab = course(f'{p}-302', 'Lab', faculty(1))
     assert exam(lab, 'Lab Test', far_week(7), section='A')
@@ -276,15 +299,51 @@ def test_theoretical_exams_never_store_a_section():
     assert [r['section'] for r in rows] == [None, None]
 
 
+def test_theory_course_sections_share_one_sitting():
+    p = prefix()
+    one, two = faculty(2)
+    cid = course(f'{p}-301', 'Theory', [one, two], sections={'A': one, 'B': two})
+    day = far_week(10)
+    a = exam(cid, 'CT 1', day, time='09:00', course_section='a', syllabus='Ch 1', faculty_ids=[two])
+    row_a = db_fetch.get_exam(a)
+    assert row_a['course_section'] == 'A' and row_a['exam_faculty_ids'] == []   # picks are ignored
+    assert row_a['faculty_ids'] == [one] and row_a['section_faculty'] == [{'section': 'A', 'name': row_a['faculty_names'][0]}]
+
+    # Section B posted later for a different time: Section A follows (both sections sit together).
+    b = exam(cid, 'CT 1', day + timedelta(days=1), time='10:00', course_section='B', syllabus='Ch 4')
+    rows = {r['id']: r for r in db_fetch.query_exams(db_fetch.ExamQuery(course_ids=(cid,)))}
+    assert {(r['exam_date'], r['exam_time']) for r in rows.values()} == {((day + timedelta(days=1)).isoformat(), '10:00:00')}
+    assert rows[b]['faculty_ids'] == [two] and rows[a]['syllabus'] == 'Ch 1'
+
+    # "Both sections" cannot coexist with a section's own record of the same exam.
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        exam(cid, 'CT 1', day, course_section=None)
+    assert err.value.code == 'duplicate'
+    both = exam(cid, 'CT 2', day + timedelta(days=7))
+    row = db_fetch.get_exam(both)
+    assert row['course_section'] is None and sorted(row['faculty_ids']) == sorted([one, two])
+    assert [i['section'] for i in row['section_faculty']] == ['A', 'B']
+
+    # Student filters: a section sees its own record and both-sections records.
+    section_a = db_fetch.query_exams(db_fetch.ExamQuery(course_ids=(cid,), section='A'))
+    assert sorted(r['id'] for r in section_a) == sorted([a, both])
+
+    # Sessional exams never store a course section, even via a raw insert.
+    lab = course(f'{p}-302', 'Lab', [one])
+    db_fetch._rest('POST', 'exams', payload={'course_id': lab, 'exam_type': 'Lab Test', 'exam_date': '2031-03-09',
+                                             'course_section': 'A'})
+    assert [r['course_section'] for r in db_fetch.query_exams(db_fetch.ExamQuery(course_ids=(lab,)))] == [None]
+
+
 def test_edit_exam_and_faculty_selection():
     p = prefix()
     fac = faculty(2)
-    cid = course(f'{p}-301', 'Theory', fac)
-    eid = exam(cid, 'CT 1', far_week(8), syllabus='old', faculty_ids=[fac[0]])
+    cid = course(f'{p}-302', 'Lab', fac)
+    eid = exam(cid, 'Lab Test', far_week(8), syllabus='old', faculty_ids=[fac[0]])
     assert db_fetch.get_exam(eid)['faculty_source'] == 'exam'
-    exam(cid, 'CT 2', far_week(8) + timedelta(days=1), time='10:30', syllabus='line 1\nline 2', faculty_ids=[], exam_id=eid)
+    exam(cid, 'Evaluation', far_week(8) + timedelta(days=1), time='10:30', syllabus='line 1\nline 2', faculty_ids=[], exam_id=eid)
     row = db_fetch.get_exam(eid)
-    assert (row['exam_type'], row['exam_time'], row['syllabus']) == ('CT 2', '10:30:00', 'line 1\nline 2')
+    assert (row['exam_type'], row['exam_time'], row['syllabus']) == ('Evaluation', '10:30:00', 'line 1\nline 2')
     assert row['faculty_source'] == 'course' and len(row['faculty_names']) == 2
 
 
@@ -298,7 +357,7 @@ def test_agent_weekly_and_filters_against_real_db():
     sunday = far_week(20)
     exam(theory, 'CT 1', sunday, time='09:00', syllabus='Ch 1\nCh 2')
     exam(lab, 'Lab Test', sunday + timedelta(days=2), time='14:00', section='A')
-    exam(theory, 'CT 2', sunday + timedelta(days=4), faculty_ids=[fac[1]])
+    exam(theory, 'CT 2', sunday + timedelta(days=4), course_section='B')
     exam(theory, 'CT 3', sunday + timedelta(days=7))               # following week: must not appear
 
     cache = CatalogCache(ttl=0)
@@ -313,16 +372,19 @@ def test_agent_weekly_and_filters_against_real_db():
     assert 'Ch 1\nCh 2' in text
     assert reply.metrics.llm_calls == 0 and reply.metrics.db_calls == 3   # 2 catalog + 1 exam query
 
-    # Whole-class (Theoretical) exams show for every section; sectioned Sessional ones only for theirs.
+    # Both-sections / whole-class exams show for every section; sectioned ones only for theirs.
     section_a = answer('next week exams for section A', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
-    assert all(t in section_a.text for t in ('CT 1', 'Lab Test', 'CT 2')), section_a.text
+    assert all(t in section_a.text for t in ('CT 1', 'Lab Test')), section_a.text
+    ours = [block for block in section_a.text.split('\n\n') if f'{p}-301' in block]
+    assert ours and not any('CT 2' in block for block in ours)   # CT 2 is Section B only
     section_b = answer(f'next week exams of {p}-302 for section B', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert 'Lab Test' not in section_b.text
 
     teacher = db_fetch.fetch_faculty()
     second_name = next(f['name'] for f in teacher if f['id'] == fac[1])
     by_teacher = answer(f'next week exams of {second_name} sir', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
-    assert 'CT 2' in by_teacher.text and 'Lab Test' in by_teacher.text   # Lab: via course faculty; CT 2: picked
+    assert 'CT 2' in by_teacher.text and 'Lab Test' in by_teacher.text   # Lab: via course faculty; CT 2: Section B
+    assert 'CT 2 · Section B' in by_teacher.text
 
     exact_title = answer(f'next quantum widgets {tag} exam', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert exact_title.outcome == 'answered' and 'Lab Test' not in exact_title.text   # exact title wins
@@ -351,7 +413,8 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
     fac = [client.post('/api/faculty', headers=headers, json={'name': f'Dr {p} {i}'}).json()['id'] for i in range(2)]
     catalog_cache.get()  # warm the cache before the course exists
     created = client.post('/api/courses', headers=headers,
-                          json={'code': f'{p.lower()} 211', 'title': f'Applied Things {p}', 'faculty_ids': fac})
+                          json={'code': f'{p.lower()} 211', 'title': f'Applied Things {p}',
+                                'section_faculty': {'A': fac[0], 'B': fac[0]}})
     assert created.status_code == 201, created.text
     cid = created.json()['id']
 
@@ -370,7 +433,8 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
     assert f'{p}-211' in reply.text and 'Unit 1' in reply.text
 
     renamed = client.patch(f'/api/courses/{cid}', headers=headers,
-                           json={'code': f'{p}-211', 'title': f'Renamed Things {p}', 'faculty_ids': fac})
+                           json={'code': f'{p}-211', 'title': f'Renamed Things {p}',
+                                 'section_faculty': {'A': fac[0], 'B': fac[1]}})
     assert renamed.status_code == 200
     reply = answer(f'next renamed things {p.lower()} exam', clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
     assert f'Renamed Things {p}' in reply.text

@@ -30,10 +30,10 @@ Messenger ──► POST /webhook (main.py) ──► Chatbot.answer ──► S
 | Object | Purpose |
 |---|---|
 | `courses` | Code, title, aliases. `course_type` is a generated column from the code (odd = Theoretical, even = Sessional). Active = `archived_at is null`; one active row per code. |
-| `faculty`, `course_faculty` | One faculty directory, many-to-many with courses. |
+| `faculty`, `course_faculty` | One faculty directory, many-to-many with courses. `course_faculty.sections` lists the course sections (A, B) a teacher takes on a Theoretical course; empty for Sessional. |
 | `exam_types` | The single list of allowed exam types per course type (CT 1, CT 2, Mid, CT 3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). |
-| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; section for Sessional exams only (NULL = whole class; always NULL for Theoretical, enforced by the `exams_theory_whole_class` trigger), syllabus, venue, remarks, notes link. |
-| `exam_details` (view) | Read model used by the bot and dashboard. |
+| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; `section` = class section, Sessional only (NULL = whole class); `course_section` = A/B, Theoretical only (NULL = both course sections). The `exams_theory_whole_class` trigger keeps each column NULL for the other course type. Syllabus, venue, remarks, notes link. `exam_faculty` is used for Sessional exams only. |
+| `exam_details` (view) | Read model used by the bot and dashboard. For Theoretical exams `faculty_*` are the teachers of the exam's course section(s), and `section_faculty` is `[{"section", "name"}]`. |
 | `cr_save_course`, `cr_save_exam`, `cr_remove_course`, `cr_remove_faculty` | Transactional write RPCs; validation is repeated in triggers. |
 | `cr_members` | Supabase Auth users allowed to use the dashboard. |
 
@@ -42,12 +42,14 @@ The original flat `"Exams"` table is left untouched; its rows were copied into t
 ### Business rules
 
 - **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`), with shared test vectors.
-- **Faculty per course**: Theoretical exactly 2 (no override), Sessional any number. `faculty_exception_note` is no longer used.
-- **Sections**: only Sessional exams have one; CTs/Mid are held for every section on the same day. The dashboard hides the field and the API/DB drop any section sent for a Theoretical course.
+- **Course sections (Theoretical)**: every Theoretical course has course sections A and B with one course teacher each; the same teacher may take both (so 1 or 2 distinct teachers). Sessional courses have no course sections and any number of teachers. `faculty_exception_note` is no longer used.
+- **Theoretical exams** are posted for course section A, B or both. The teacher is derived from the section (exam-level picks are ignored). Both sections sit an exam together, so `cr_save_exam` moves the other section's record of the same exam type to the saved date/time. Only one record per course section per exam type (whatever the date).
+- **Class sections**: only Sessional exams have one, and Sessional exams of different class sections may be at different times. The bot's `section` filter matches the class section or the course section (NULL rows always match).
+- **Date/time input**: the dashboard uses dropdowns (`AI_CR/src/lib/pickers.js`) — dates from 14 days back to 180 days ahead, times 7 AM–11 PM in 5-minute steps; an existing value outside those lists is still offered.
 - The odd/even rule is not shown in the dashboard or student pages; CRs only see the resulting type.
 - **Exam types** must match the course type — enforced by the API and by a database trigger.
 - **Removing a course** that has exams archives it (history kept); a course without exams is deleted.
-- **Duplicate saves**: the exam form sends a `client_request_id`; retries return the same row. A second exam with the same course, type, date and section is rejected.
+- **Duplicate saves**: the exam form sends a `client_request_id`; retries return the same row. A second Sessional exam with the same course, type, date and class section is rejected; for Theoretical, see above.
 
 ### Student agent (`Chatbot/`)
 
@@ -111,6 +113,12 @@ a fresh project or for reference; step 5 (CR account) still has to be done once.
 Theoretical exams, Mid enabled) was applied on 2026-10-14; rollback in
 `supabase/rollback/20261013150000_course_rules_update_down.sql`. The same day all old exam and course data
 (including the legacy `"Exams"` rows) was deleted at the CRs' request, so production started empty for the new term.
+
+`20261014074933_theory_course_sections.sql` (applied 2026-10-14) adds course sections (see Business rules); rollback in
+`supabase/rollback/20261014074933_theory_course_sections_down.sql`. It keeps existing Theoretical courses'
+teachers but assigns no sections — the CR picks the Section A and B teachers under **Courses** (the course card
+shows a reminder until they are set) before posting Theoretical exams. The new `cr_save_course` /
+`cr_save_exam` signatures replace the old ones, so deploy the backend right after applying it.
 
 `supabase/migrations/20261013031917_dynamic_course_config.sql` is the real change;
 `20261013031653_legacy_exams_baseline.sql` only documents the existing table (a no-op on the live database).

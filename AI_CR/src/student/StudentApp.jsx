@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
 import { MESSENGER_URL, publicApi } from '../lib/publicApi.js'
-import { formatDay, formatTime, groupByDay, groupByWeek, isSafeLink, relativeDayBadge } from '../lib/format.js'
+import {
+  facultyText,
+  formatDay,
+  formatTime,
+  groupByDay,
+  groupByWeek,
+  isSafeLink,
+  relativeDayBadge,
+  sectionText,
+} from '../lib/format.js'
 import { Banner, EmptyState, LoadingBlock, Spinner } from '../components/ui.jsx'
 
 const PAGE_SIZE = 20
@@ -16,7 +25,7 @@ function ExamCard({ exam }) {
         <p className="exam-card-meta">
           <span className="badge badge-type">{exam.exam_type}</span>
           {time ? <span>🕘 {time}</span> : <span className="muted">Time TBA</span>}
-          <span>{exam.section ? `Section ${exam.section}` : 'Whole class'}</span>
+          <span>{sectionText(exam)}</span>
           {exam.venue ? <span>📍 {exam.venue}</span> : null}
         </p>
         {exam.syllabus ? (
@@ -28,7 +37,7 @@ function ExamCard({ exam }) {
           <p className="muted small">Syllabus not posted yet</p>
         )}
         {exam.remarks ? <p className="small">📝 {exam.remarks}</p> : null}
-        {exam.faculty_names?.length ? <p className="muted small">👤 {exam.faculty_names.join(', ')}</p> : null}
+        {facultyText(exam) ? <p className="muted small">👤 {facultyText(exam)}</p> : null}
         {isSafeLink(exam.notes_link) ? (
           <a className="student-link" href={exam.notes_link} target="_blank" rel="noopener noreferrer">
             📎 Open notes

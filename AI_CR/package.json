@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test tests/academic.test.js tests/format.test.js",
+    "test": "node --test tests/academic.test.js tests/format.test.js tests/pickers.test.js",
     "e2e:build": "vite build --mode e2e --outDir dist-e2e",
     "e2e:preview": "vite preview --mode e2e --outDir dist-e2e --port 4179 --strictPort --host 127.0.0.1",
     "e2e": "node e2e/mobile.e2e.mjs"

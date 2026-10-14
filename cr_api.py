@@ -80,7 +80,7 @@ def config(user: CR) -> dict:
     return {
         'exam_types': by_type,
         'legacy_exam_types': [row['name'] for row in types if row['is_legacy']],
-        'faculty_rules': {k: {'min': v[0], 'max': v[1]} for k, v in academic.FACULTY_COUNT_RULES.items()},
+        'course_sections': list(academic.COURSE_SECTIONS),
         'timezone': dr.TIMEZONE_NAME,
         'today': dr.today_local().isoformat(),
     }
@@ -150,7 +150,8 @@ class CourseIn(BaseModel):
     code: str = Field(max_length=20)
     title: str = Field(max_length=200)
     aliases: list[str] = Field(default_factory=list, max_length=10)
-    faculty_ids: list[int] = Field(default_factory=list, max_length=8)
+    faculty_ids: list[int] = Field(default_factory=list, max_length=8)  # Sessional courses
+    section_faculty: dict[str, int] = Field(default_factory=dict)       # Theoretical: {'A': id, 'B': id}
     faculty_exception_note: str | None = Field(default=None, max_length=500)  # ignored; kept for old clients
 
     @field_validator('title')
@@ -169,15 +170,27 @@ class CourseIn(BaseModel):
             raise ValueError('Each alias must be at most 60 characters')
         return list(dict.fromkeys(cleaned))
 
+    @field_validator('section_faculty')
+    @classmethod
+    def _sections(cls, v: dict[str, int]) -> dict[str, int]:
+        cleaned = {k.strip().upper(): fid for k, fid in v.items() if fid}
+        if set(cleaned) - set(academic.COURSE_SECTIONS):
+            raise ValueError('Course sections are A and B')
+        return dict(sorted(cleaned.items()))
 
-def _validate_course(body: CourseIn) -> tuple[str, str]:
+
+def _validate_course(body: CourseIn) -> tuple[str, list[int], dict[str, int]]:
+    """Returns (code, faculty_ids, section_faculty). A Theoretical course's teachers
+    are exactly its section teachers (one person may take both sections)."""
     parsed = academic.parse_course_code(body.code)
     if not parsed.ok:
         raise _fail(422, parsed.error, 'code')
-    count_error = academic.faculty_count_error(parsed.course_type, len(set(body.faculty_ids)))
-    if count_error:
-        raise _fail(422, count_error, 'faculty_ids')
-    return parsed.code, parsed.course_type
+    if not academic.has_course_sections(parsed.course_type):
+        return parsed.code, sorted(set(body.faculty_ids)), {}
+    section_error = academic.section_faculty_error(parsed.course_type, body.section_faculty)
+    if section_error:
+        raise _fail(422, section_error, 'section_faculty')
+    return parsed.code, sorted(set(body.section_faculty.values())), body.section_faculty
 
 
 @router.get('/courses')
@@ -189,11 +202,11 @@ def list_courses(user: CR) -> dict:
 
 
 def _save_course(course_id: int | None, body: CourseIn) -> dict:
-    code, _ = _validate_course(body)
+    code, faculty_ids, section_faculty = _validate_course(body)
     try:
         saved_id = db_fetch.save_course(
             course_id=course_id, code=code, title=body.title, aliases=body.aliases,
-            faculty_ids=sorted(set(body.faculty_ids)), faculty_exception_note=None,
+            faculty_ids=faculty_ids, section_faculty=section_faculty,
         )
         course = db_fetch.fetch_course(saved_id)
     except db_fetch.DatabaseError as error:
@@ -201,8 +214,10 @@ def _save_course(course_id: int | None, body: CourseIn) -> dict:
             raise _fail(409, f'{code} is already configured. Edit the existing course instead.', 'code') from error
         if error.code in ('invalid_course_code',):
             raise _fail(422, str(error), 'code') from error
-        if error.code in ('faculty_count', 'unknown_faculty'):
-            raise _fail(422, str(error), 'faculty_ids') from error
+        if error.code == 'faculty_sections':
+            raise _fail(422, str(error), 'section_faculty') from error
+        if error.code == 'unknown_faculty':
+            raise _fail(422, str(error), 'section_faculty' if section_faculty else 'faculty_ids') from error
         raise _db_error(error) from error
     finally:
         _data_changed()
@@ -238,7 +253,8 @@ class ExamIn(BaseModel):
     exam_type: str = Field(max_length=60)
     exam_date: date
     exam_time: dtime | None = None
-    section: str | None = Field(default=None, max_length=10)
+    section: str | None = Field(default=None, max_length=10)          # class section (Sessional)
+    course_section: str | None = Field(default=None, max_length=10)   # A / B / None = both (Theoretical)
     syllabus: str | None = Field(default=None, max_length=10000)
     venue: str | None = Field(default=None, max_length=200)
     remarks: str | None = Field(default=None, max_length=2000)
@@ -277,7 +293,22 @@ class ExamIn(BaseModel):
         return v
 
 
-def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | None]:
+def _theory_exam_section(course: dict, raw: str | None) -> str | None:
+    """Validated course section for a Theoretical exam; its teacher(s) must already be assigned."""
+    try:
+        course_section = academic.normalize_course_section(raw)
+    except ValueError as error:
+        raise _fail(422, str(error), 'course_section') from error
+    assigned = course.get('section_faculty') or {}
+    missing = [s for s in ([course_section] if course_section else academic.COURSE_SECTIONS) if s not in assigned]
+    if missing:
+        raise _fail(422, f'{course["code"]} has no course teacher for Section {" and Section ".join(missing)} yet. '
+                         'Assign it under Courses first.', 'course_section')
+    return course_section
+
+
+def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | None, str | None]:
+    """Returns (course, class section, course section)."""
     course = db_fetch.fetch_course(body.course_id)
     if course is None:
         raise _fail(422, 'Select a course.', 'course_id')
@@ -294,6 +325,10 @@ def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | Non
         raise _fail(422, f'{body.exam_type} is not valid for a {course["course_type"]} course. '
                          f'Choose one of: {", ".join(allowed)}.', 'exam_type')
 
+    if academic.has_course_sections(course['course_type']):
+        # Both course sections sit it at one time; the teachers come from the course section.
+        return course, None, _theory_exam_section(course, body.course_section)
+
     faculty_ids = sorted(set(body.faculty_ids))
     unchanged = existing is not None and existing['course_id'] == body.course_id and \
         sorted(existing.get('exam_faculty_ids') or []) == faculty_ids
@@ -301,26 +336,26 @@ def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | Non
     if not unchanged and not set(faculty_ids) <= course_faculty:
         raise _fail(422, 'Selected faculty must be assigned to this course.', 'faculty_ids')
 
-    if not academic.has_sections(course['course_type']):
-        return course, None  # Theoretical exams are for the whole class
     try:
         section = academic.normalize_section(body.section)
     except ValueError as error:
         raise _fail(422, str(error), 'section') from error
-    return course, section
+    return course, section, None
 
 
 def _save_exam(exam_id: int | None, body: ExamIn, user: CRUser) -> dict:
+    theory = False
     try:
         existing = db_fetch.get_exam(exam_id) if exam_id is not None else None
         if exam_id is not None and existing is None:
             raise _fail(404, 'Exam record not found.')
-        _, section = _validate_exam(body, existing)
+        course, section, course_section = _validate_exam(body, existing)
+        theory = academic.has_course_sections(course['course_type'])
         saved_id = db_fetch.save_exam(
             exam_id=exam_id, course_id=body.course_id, exam_type=body.exam_type,
-            exam_date=body.exam_date, exam_time=body.exam_time, section=section,
+            exam_date=body.exam_date, exam_time=body.exam_time, section=section, course_section=course_section,
             syllabus=body.syllabus, venue=body.venue, remarks=body.remarks, notes_link=body.notes_link,
-            faculty_ids=sorted(set(body.faculty_ids)),
+            faculty_ids=[] if theory else sorted(set(body.faculty_ids)),
             client_request_id=str(body.client_request_id) if body.client_request_id and exam_id is None else None,
             user_id=user.id,
         )
@@ -328,11 +363,14 @@ def _save_exam(exam_id: int | None, body: ExamIn, user: CRUser) -> dict:
         row = db_fetch.get_exam(saved_id)
     except db_fetch.DatabaseError as error:
         if error.code == 'duplicate':
-            raise _fail(409, str(error), 'exam_date') from error
+            # Theoretical: one record per course section per exam type, whatever the date.
+            raise _fail(409, str(error), 'course_section' if theory else 'exam_date') from error
         if error.code == 'invalid_exam_type':
             raise _fail(422, str(error), 'exam_type') from error
         if error.code == 'invalid_faculty':
             raise _fail(422, str(error), 'faculty_ids') from error
+        if error.code == 'invalid_course_section':
+            raise _fail(422, str(error), 'course_section') from error
         raise _db_error(error) from error
     if row is None:
         raise _fail(502, 'The exam was saved but could not be read back. Refresh to check.')
@@ -406,18 +444,28 @@ def preview_exam(body: ExamIn, user: CR) -> dict:
         raise _db_error(error) from error
     if course is None:
         raise _fail(422, 'Select a course.', 'course_id')
-    picked = [f['name'] for f in course['faculty'] if f['id'] in set(body.faculty_ids)]
-    try:
-        section = academic.normalize_section(body.section) if academic.has_sections(course['course_type']) else None
-    except ValueError as error:
-        raise _fail(422, str(error), 'section') from error
+    section = course_section = None
+    section_faculty: list[dict] = []
+    if academic.has_course_sections(course['course_type']):
+        course_section = _theory_exam_section(course, body.course_section)
+        section_faculty = [{'section': s, 'name': f['name']} for s, f in sorted(course['section_faculty'].items())
+                           if course_section in (None, s)]
+        names = sorted({item['name'] for item in section_faculty}, key=str.lower)
+        source = 'course'
+    else:
+        try:
+            section = academic.normalize_section(body.section)
+        except ValueError as error:
+            raise _fail(422, str(error), 'section') from error
+        picked = [f['name'] for f in course['faculty'] if f['id'] in set(body.faculty_ids)]
+        names = picked or [f['name'] for f in course['faculty']]
+        source = 'exam' if picked else 'course'
     row = {
-        'course_code': course['code'], 'course_title': course['title'], 'exam_type': body.exam_type,
-        'exam_date': body.exam_date.isoformat(),
+        'course_code': course['code'], 'course_title': course['title'], 'course_type': course['course_type'],
+        'exam_type': body.exam_type, 'exam_date': body.exam_date.isoformat(),
         'exam_time': body.exam_time.isoformat() if body.exam_time else None,
-        'section': section, 'syllabus': body.syllabus, 'venue': body.venue,
+        'section': section, 'course_section': course_section, 'syllabus': body.syllabus, 'venue': body.venue,
         'remarks': body.remarks, 'notes_link': body.notes_link,
-        'faculty_names': picked or [f['name'] for f in course['faculty']],
-        'faculty_source': 'exam' if picked else 'course',
+        'faculty_names': names, 'faculty_source': source, 'section_faculty': section_faculty,
     }
     return {'text': formatter.format_exam(row, [], today=dr.today_local())}
