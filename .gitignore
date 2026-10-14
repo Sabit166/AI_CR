@@ -2,3 +2,5 @@ node_modules
 .vscode
 __pycache__
 .env
+.pytest_cache
+.claude
