@@ -246,7 +246,7 @@ export default function StudentApp() {
             Have a question? <a href={MESSENGER_URL} target="_blank" rel="noopener noreferrer">Ask AI CR on Messenger</a>.
           </p>
           <p className="muted small">
-            This board is read-only. Spotted a mistake? Tell your CR. · <a href="/cr/">CR sign-in</a>
+            This board is read-only. Spotted a mistake? Tell your CR. · <a href="/cr/">CR sign-in</a> · <a href="/privacy.html">Privacy</a>
           </p>
         </footer>
       </main>

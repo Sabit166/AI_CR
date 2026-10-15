@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="description" content="How the AI CR exam bot and exam board handle your data." />
+    <title>AI CR · Privacy Policy</title>
+    <style>
+      :root {
+        --text: #4b5263;
+        --text-h: #0f172a;
+        --bg: #eef3f5;
+        --surface: #ffffff;
+        --border: #d5dde3;
+        --accent: #0f766e;
+        font: 16px/1.6 Inter, 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      body { margin: 0; padding: 24px 16px 48px; }
+      main {
+        max-width: 720px; margin: 0 auto; padding: 28px 24px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      }
+      h1, h2 { color: var(--text-h); line-height: 1.25; }
+      h1 { font-size: 1.75rem; margin: 0 0 4px; }
+      h2 { font-size: 1.15rem; margin: 28px 0 8px; }
+      a { color: var(--accent); }
+      .updated { margin: 0 0 20px; font-size: 0.9rem; }
+      ul { padding-left: 1.25rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated: 15 October 2026</p>
+
+      <p>
+        AI CR is a student project that helps students find exam dates, syllabus and notes
+        posted by their class representatives (CRs). It has two parts: a Messenger chatbot on our
+        Facebook Page and the exam board website. This policy explains what data each part uses.
+      </p>
+
+      <h2>The Messenger chatbot</h2>
+      <p>When you send a message to our Facebook Page, Facebook forwards it to our server together with your Page-scoped ID (a number Facebook assigns to you for this Page only). We use them to:</p>
+      <ul>
+        <li>work out what you are asking. The text of your message is sent to OpenAI's API, which classifies it as a question about a course, date or exam type;</li>
+        <li>look up matching exams in our database, which holds only exam information posted by CRs;</li>
+        <li>send the answer back to you through Facebook Messenger.</li>
+      </ul>
+      <p>
+        <strong>We do not save your messages, your name or your Facebook ID.</strong> The ID is held only in memory
+        while we reply. Our server logs record that a message was answered and how long it took, never what it said
+        or who sent it. Facebook keeps its own copy of the conversation under
+        <a href="https://www.facebook.com/privacy/policy/">Meta's Privacy Policy</a>, and OpenAI handles API requests under
+        <a href="https://openai.com/policies/privacy-policy/">its own policy</a>, which does not use API data for training.
+      </p>
+
+      <h2>The exam board website</h2>
+      <p>
+        Students can browse the exam board without an account. It uses no cookies, analytics or advertising trackers.
+        Our hosting providers (Vercel and Render) may keep standard access logs, such as IP address and request time, for security.
+      </p>
+      <p>
+        CRs sign in with an email address and password, managed by Supabase. We store the CR's email address and the
+        exam details they post. The sign-in session is kept in the CR's browser.
+      </p>
+
+      <h2>Sharing</h2>
+      <p>We do not sell or share your data with anyone other than the service providers named above, which we need to run the bot and the website.</p>
+
+      <h2>Deleting your data</h2>
+      <p>See our <a href="/data-deletion.html">data deletion instructions</a>.</p>
+
+      <h2>Contact</h2>
+      <p>For any question about this policy, send a message to our Facebook Page on <a href="https://m.me/61592083183113">Messenger</a>.</p>
+    </main>
+  </body>
+</html>
