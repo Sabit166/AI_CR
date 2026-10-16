@@ -676,6 +676,3 @@ legend { margin-bottom: 8px; }
 .discord-buttons .btn { width: 100%; }
 .discord-auto { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .discord-auto input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--accent); }
-@media (min-width: 720px) {
-  .discord-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}

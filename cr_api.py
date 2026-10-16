@@ -522,7 +522,7 @@ _posts_lock = threading.Lock()
 
 
 class PostIn(BaseModel):
-    kind: Literal['this_week', 'next_week', 'next_exam_day', 'next_exam_notes']
+    kind: Literal['next_exam_day', 'next_exam_notes']  # week updates are posted from Discord
 
 
 def _post(user: CRSession, what: str, build) -> dict:
@@ -551,8 +551,6 @@ def _post(user: CRSession, what: str, build) -> dict:
 def post_update(body: PostIn, user: CR) -> dict:
     now = dr.now_local()
     builders = {
-        'this_week': lambda: updates.week_update(user.class_id, 'this', now),
-        'next_week': lambda: updates.week_update(user.class_id, 'next', now),
         'next_exam_day': lambda: updates.next_exam_day_update(user.class_id, now),
         'next_exam_notes': lambda: updates.next_exam_day_update(user.class_id, now, notes_only=True),
     }

@@ -360,7 +360,6 @@ def exams_this_week(monkeypatch):
 
 
 @pytest.mark.parametrize('kind,expect', [
-    ('this_week', "This week's exams"), ('next_week', "Next week's exams"),
     ('next_exam_day', 'Next exam day'), ('next_exam_notes', 'Notes for the next exam day'),
 ])
 def test_post_update_to_class_channel(client, exams_this_week, kind, expect):
@@ -378,8 +377,8 @@ def test_post_single_exam(client, exams_this_week):
 
 
 def test_double_tap_posts_once(client, exams_this_week):
-    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_week'}).status_code == 200
-    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_week'}).status_code == 429
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_exam_day'}).status_code == 200
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_exam_day'}).status_code == 429
     assert len(client.posted) == 1
 
 
@@ -387,21 +386,22 @@ def test_bot_without_channel_access_is_explained(client, exams_this_week, monkey
     def denied(channel, messages):
         raise discord.DiscordError('403', status=403, code=discord.MISSING_ACCESS)
     monkeypatch.setattr(discord, 'post_messages', denied)
-    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'})
+    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_exam_notes'})
     assert r.status_code == 502 and 'Send Messages' in r.json()['detail']['message']
     # A failed post doesn't block retrying straight away.
     monkeypatch.setattr(discord, 'post_messages', lambda channel, messages: client.posted.append(channel))
-    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'}).status_code == 200
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_exam_notes'}).status_code == 200
 
 
 def test_unlinked_class_cannot_post(client, monkeypatch):
     monkeypatch.setattr(db_fetch, 'fetch_class', lambda cid: {**CLASSES[CLASS_ID], 'discord_channel_id': None})
-    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'})
+    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_exam_notes'})
     assert r.status_code == 409 and '/setup' in r.json()['detail']['message']
 
 
-def test_unknown_post_kind_rejected(client):
-    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'everything'}).status_code == 422
+@pytest.mark.parametrize('kind', ['everything', 'this_week', 'next_week'])  # week updates come from Discord
+def test_unknown_post_kind_rejected(client, kind):
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': kind}).status_code == 422
 
 
 def test_toggle_auto_updates(client, monkeypatch):

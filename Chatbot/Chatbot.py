@@ -1,8 +1,8 @@
 """Student-facing exam assistant.
 
-Flow per message (at most 1 LLM call, normally 1-2 database calls):
+Flow per message (no AI service; normally 1-2 database calls):
   1. Load the course catalog (cached; see catalog.py).
-  2. Parse intent with one structured-output LLM call (rule-based fallback if unavailable).
+  2. Parse the question with rules (intent.py).
   3. Resolve course/teacher mentions deterministically against the catalog.
   4. Compute the date range in Asia/Dhaka and run ONE filtered exam_details query.
   5. Format the rows deterministically (no generated facts).
@@ -23,7 +23,7 @@ import db_fetch
 
 from . import formatter
 from .catalog import CatalogCache, catalog_cache as default_catalog_cache
-from .intent import IntentUnavailable, _heuristic_time, heuristic_parse, llm_parse
+from .intent import heuristic_parse
 from .resolver import scan_message_for_courses
 from .retrieval import ExamRepository, execute, plan_query
 
@@ -44,32 +44,10 @@ class BotReply:
         return '\n\n'.join(self.messages)
 
 
-# Time expressions the rule parser recognises unambiguously. When one is present it
-# overrides the LLM's choice: small models sometimes read "exams next week" as
-# "the next exam", and the weekly answer must never depend on that guess.
-DETERMINISTIC_TIME_KINDS = {
-    'next_week', 'this_week', 'today', 'tomorrow', 'day_after_tomorrow', 'in_days',
-    'weekday_range', 'date',
-}
 LIST_TIME_KINDS = {'this_week', 'next_week', 'weekday_range', 'date_range', 'upcoming'}
 
 
-def _parse(message: str, exam_type_names: list[str], catalog, use_llm: bool):
-    if use_llm:
-        try:
-            intent = llm_parse(message, exam_type_names)
-        except IntentUnavailable as error:
-            logger.warning('intent LLM unavailable, using rule-based parser: %s', error)
-        else:
-            rule_time = _heuristic_time(message.lower())
-            if rule_time.kind in DETERMINISTIC_TIME_KINDS and rule_time != intent.time:
-                intent.time = rule_time
-            if intent.category == 'off_topic' and rule_time.kind in DETERMINISTIC_TIME_KINDS:
-                intent.category = 'exam_query'
-            if not intent.exam_types:
-                # Explicit keywords ("CT 2", "lab test") are matched deterministically too.
-                intent.exam_types = heuristic_parse(message, exam_type_names).exam_types
-            return _normalize_fields(intent)
+def _parse(message: str, exam_type_names: list[str], catalog):
     intent = heuristic_parse(message, exam_type_names)
     intent.course_mentions = scan_message_for_courses(message, catalog)
     return _normalize_fields(intent)
@@ -90,7 +68,6 @@ def answer(
     clock: dr.Clock | None = None,
     repo: ExamRepository = db_fetch,
     cache: CatalogCache = default_catalog_cache,
-    use_llm: bool = True,
 ) -> BotReply:
     metrics = db_fetch.start_metrics()
     started = time.perf_counter()
@@ -104,7 +81,7 @@ def answer(
 
         now = dr.now_local(clock)
         catalog = cache.get(class_id)
-        intent = _parse(message, catalog.exam_type_names(), catalog, use_llm)
+        intent = _parse(message, catalog.exam_type_names(), catalog)
         source = intent.source
 
         if intent.category == 'greeting':
@@ -137,8 +114,8 @@ def answer(
         return BotReply([formatter.GENERIC_ERROR_TEXT], outcome, source, metrics)
     finally:
         logger.info(
-            'chat outcome=%s intent=%s llm_calls=%d llm_ms=%.0f db_calls=%d db_ms=%.0f total_ms=%.0f',
-            outcome, source, metrics.llm_calls, metrics.llm_ms, metrics.db_calls, metrics.db_ms,
+            'chat outcome=%s db_calls=%d db_ms=%.0f total_ms=%.0f',
+            outcome, metrics.db_calls, metrics.db_ms,
             (time.perf_counter() - started) * 1000,
         )
 
@@ -148,10 +125,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Chat with the exam bot.')
     parser.add_argument('message', help='User message to evaluate')
     parser.add_argument('--class-id', type=int, required=True, help='Class (public.classes.id) to answer for')
-    parser.add_argument('--no-llm', action='store_true', help='Use the rule-based parser only')
     args = parser.parse_args()
 
-    reply = answer(args.message, class_id=args.class_id, use_llm=not args.no_llm)
+    reply = answer(args.message, class_id=args.class_id)
     for part in reply.messages:
         print(part)
         print('-' * 40)

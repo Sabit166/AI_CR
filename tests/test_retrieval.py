@@ -37,7 +37,7 @@ def repo():
 
 
 def ask(message, repo, cache, at=TUESDAY):
-    return answer(message, class_id=CLASS_ID, clock=clock_at(at), repo=repo, cache=cache, use_llm=False)
+    return answer(message, class_id=CLASS_ID, clock=clock_at(at), repo=repo, cache=cache)
 
 
 def ids_in(reply_text, rows=ROWS):
@@ -284,20 +284,6 @@ def test_catalog_failure_is_db_error():
     assert reply.outcome == 'db_error'
 
 
-def test_llm_failure_falls_back_to_rules(repo, cache, monkeypatch):
-    monkeypatch.setenv('MODEL', 'x')
-    monkeypatch.setenv('OPENAI_API_KEY', 'x')
-    from Chatbot import intent
-
-    def boom():
-        raise RuntimeError('network down')
-    monkeypatch.setattr(intent, '_client', boom)
-    reply = answer('What exams are scheduled next week?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
-    assert reply.intent_source == 'heuristic'
-    assert ids_in(reply.text) == [4, 10, 5, 6]
-    assert reply.metrics.llm_calls == 1
-
-
 # --- Many records: nothing dropped -------------------------------------------
 def test_long_week_is_split_without_losing_records(cache):
     rows = [exam_row(100 + i, 1 + i % 6, 'CT 1' if (1 + i % 6) in (1, 2, 4, 6) else 'Lab Test',
@@ -318,26 +304,8 @@ def test_plan_uses_single_query_for_ranges(repo, catalog):
     assert (q.course_ids, q.exam_types, q.date_from, q.date_to) == ((4,), ('CT 1', 'CT 2'), date(2026, 10, 18), date(2026, 10, 22))
 
 
-def test_rule_based_time_overrides_llm_misreading_next_week(repo, cache, monkeypatch):
-    """Observed with gpt-4.1-nano: "What exams are scheduled next week?" -> kind 'next', fields ['date']."""
-    from Chatbot import Chatbot as bot
-    from Chatbot.intent import Intent, TimeScope
-
-    monkeypatch.setattr(bot, 'llm_parse', lambda message, types: Intent(
-        category='exam_query', time=TimeScope('next'), fields=['date'], exam_types=[], source='llm'))
-    reply = answer('What exams are scheduled next week?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
-    assert date_bounds(repo.queries[0]) == (date(2026, 10, 18), date(2026, 10, 22))
-    assert ids_in(reply.text) == [4, 10, 5, 6]
-    assert 'ER model' in reply.text            # full details, not just dates
-
-
-def test_rule_based_exam_type_fills_llm_gap(repo, cache, monkeypatch):
-    from Chatbot import Chatbot as bot
-    from Chatbot.intent import Intent, TimeScope
-
-    monkeypatch.setattr(bot, 'llm_parse', lambda message, types: Intent(
-        category='exam_query', course_mentions=['DBMS'], time=TimeScope('next'), exam_types=[], source='llm'))
-    answer('When is the next DBMS CT 2?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
+def test_exam_type_keyword_is_matched(repo, cache):
+    ask('When is the next DBMS CT 2?', repo, cache)
     assert repo.queries[0].exam_types == ('CT 2',)
 
 

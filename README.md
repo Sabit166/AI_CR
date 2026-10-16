@@ -41,13 +41,14 @@ what was posted — and announces next week's exams and tomorrow's exams on its 
 
 ### Slash commands
 
-Type `/` in your class channel and pick a command. The answer is shown **only to you**, so the channel stays tidy.
+Type `/` in your class channel and the commands pop up — pick one. The answer is shown **only to you**, so the
+channel stays tidy. (When a CR runs one of the four update commands, it's posted for everyone instead.)
 
 | Command | What you get |
 |---|---|
-| `/this-week` | This week's remaining exams (today until Thursday) |
-| `/next-week` | Next week's exams, Sunday to Thursday |
-| `/next-exam-day` | **Every** exam on the next day that has one — times, sections, syllabus, venue, teachers |
+| `/this-week-update` | This week's remaining exams (today until Thursday) |
+| `/next-week-update` | Next week's exams, Sunday to Thursday |
+| `/next-exam-day-update` | **Every** exam on the next day that has one — times, sections, syllabus, venue, teachers |
 | `/next-exam-notes` | The notes links for the exams on the next exam day |
 | `/exams` | A button that opens your class's list of upcoming exams |
 | `/ask` | Ask in your own words, e.g. *"When is the next CT of CSE-415?"* |
@@ -152,16 +153,12 @@ Students see it in the bot's answers and on the exam list the moment you save. T
 
 ### 📣 Posting to the class channel
 
-At the top of **Exams** there are four buttons. Each asks you to confirm, then posts in the class channel for everyone:
+**From Discord:** run `/next-week-update`, `/this-week-update`, `/next-exam-day-update` or `/next-exam-notes` in the
+class channel. Because you're a CR, the bot posts it in the channel for everyone and tells you privately that it's
+done. (Running the same one twice within 20 seconds posts it once.)
 
-| Button | Posts |
-|---|---|
-| **This week** | This week's remaining exams |
-| **Next week** | Next week's exams |
-| **Next exam day** | Every exam on the next exam day, with times |
-| **Next exam notes** | The notes links for the next exam day |
-
-Each upcoming exam also has a **📣 Post** button that announces just that exam (useful after a change).
+**From the editor:** at the top of **Exams**, **Next exam day** and **Next exam notes** post those updates after you
+confirm, and each upcoming exam has a **📣 Post** button that announces just that exam (useful after a change).
 
 **Automatic updates** (the switch under the buttons) post next week's exams every Friday at 6 PM and a reminder at
 8 PM the evening before each exam day. They're on by default; you can turn them off for your class there.
@@ -203,10 +200,10 @@ Our academic week runs **Sunday to Thursday**, and all dates follow **Bangladesh
 
 | When you ask… | You get… |
 |---|---|
-| `/this-week` | From **today** until **Thursday** |
-| `/this-week` on **Friday or Saturday** | The week is over, so you're shown **next week** instead |
-| `/next-week` | The **coming Sunday to Thursday** |
-| `/next-exam-day` | The nearest day with an exam, and **all** the exams on it (today counts until its exams have started) |
+| `/this-week-update` | From **today** until **Thursday** |
+| `/this-week-update` on **Friday or Saturday** | The week is over, so you're shown **next week** instead |
+| `/next-week-update` | The **coming Sunday to Thursday** |
+| `/next-exam-day-update` | The nearest day with an exam, and **all** the exams on it (today counts until its exams have started) |
 | *"Tomorrow"*, *"Monday"*, *"27 October"* with `/ask` | That exact day |
 
 ---

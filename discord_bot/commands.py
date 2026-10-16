@@ -22,15 +22,17 @@ COMMANDS: list[dict] = [
              'description': 'Friday next-week update and day-before reminders (default on)', 'required': False},
         ],
     },
-    {'name': 'this-week', 'description': "This week's remaining exams (Sunday–Thursday)"},
-    {'name': 'next-week', 'description': "Next week's exams (Sunday–Thursday)"},
-    {'name': 'next-exam-day', 'description': 'Every exam on the next exam day, with times and syllabus'},
-    {'name': 'next-exam-notes', 'description': 'Notes links for the exams on the next exam day'},
+    # The four updates. Run by a CR, the update is posted in the channel for everyone;
+    # run by anyone else, only they see it.
+    {'name': 'next-week-update', 'description': "Next week's exams (Sunday–Thursday). CRs: posts it for everyone"},
+    {'name': 'this-week-update', 'description': "This week's remaining exams. CRs: posts it for everyone"},
+    {'name': 'next-exam-day-update', 'description': 'Every exam on the next exam day, with times. CRs: posts it for everyone'},
+    {'name': 'next-exam-notes', 'description': 'Notes links for the next exam day. CRs: posts it for everyone'},
     {'name': 'exams', 'description': 'Open the list of upcoming exams for this class'},
     {'name': 'manage', 'description': 'CRs: open the editor for this class (link only you can see)'},
     {
         'name': 'ask',
-        'description': 'Ask about exams in your own words',
+        'description': 'Ask about exams in your own words (e.g. syllabus of the next CT of a course)',
         'options': [
             {'type': STRING, 'name': 'question', 'description': 'e.g. When is the next CT of CSE-415?',
              'required': True, 'max_length': 300},

@@ -13,8 +13,6 @@ import pytest
 # tests point these at the local Docker PostgREST explicitly.
 os.environ['SUPABASE_URL'] = 'http://127.0.0.1:9/rest/v1'
 os.environ['SUPABASE_API_KEY'] = 'test-key-not-real'
-os.environ['OPENAI_API_KEY'] = ''
-os.environ['MODEL'] = ''
 os.environ['DISCORD_BOT_TOKEN'] = ''
 os.environ['SCHEDULER_ENABLED'] = '0'
 os.environ['EDITOR_LINK_SECRET'] = 'test-editor-link-secret-0123456789abcdef'

@@ -2,9 +2,8 @@ import { useState } from 'react'
 import { api } from '../lib/api.js'
 import { ConfirmDialog, Spinner } from './ui.jsx'
 
+// This/next week updates are posted from Discord (/this-week-update, /next-week-update).
 const POSTS = [
-  { kind: 'this_week', label: 'This week', title: "Post this week's exams?" },
-  { kind: 'next_week', label: 'Next week', title: "Post next week's exams?" },
   { kind: 'next_exam_day', label: 'Next exam day', title: 'Post the next exam day?' },
   { kind: 'next_exam_notes', label: 'Next exam notes', title: 'Post the next exam notes?' },
 ]

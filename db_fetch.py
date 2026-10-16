@@ -62,8 +62,6 @@ class DatabaseError(RuntimeError):
 class CallMetrics:
     db_calls: int = 0
     db_ms: float = 0.0
-    llm_calls: int = 0
-    llm_ms: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 

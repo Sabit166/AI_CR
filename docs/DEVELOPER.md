@@ -83,10 +83,14 @@ rows; CR-typed text is escaped so it can't become Discord markdown, every messag
 `allowed_mentions: {parse: []}` (no `@everyone`/role pings), notes links are wrapped in `<…>` (no previews), and
 messages are split under 2000 characters on record boundaries.
 
-- `/this-week`: today → Thursday; Friday/Saturday says the week is over and shows next week.
-- `/next-week`: next Sunday → Thursday.
-- `/next-exam-day`: the earliest day with an exam that hasn't started (today's exams count until their start time), and **all** exams on it.
+- `/this-week-update`: today → Thursday; Friday/Saturday says the week is over and shows next week.
+- `/next-week-update`: next Sunday → Thursday.
+- `/next-exam-day-update`: the earliest day with an exam that hasn't started (today's exams count until their start time), and **all** exams on it.
 - `/next-exam-notes`: the same day, notes links only.
+- Who sees it: for a CR (see above) the four update commands post the update in the channel (or thread) they were
+  run in via the bot token, with a 20 s per-channel cooldown, and the CR gets a private confirmation; for everyone
+  else the answer is ephemeral. The editor posts only next-exam-day/notes and single exams (`/api/discord/post*`);
+  week updates come from Discord.
 - Day-before reminder: all exams on tomorrow's date; skipped (and not claimed) when there are none.
 
 ### Scheduler (`scheduler.py`)
@@ -102,16 +106,17 @@ across restarts or several instances. Temporary Discord errors release the claim
 ones (no channel access) are marked `failed`. On Render's free plan the service must be awake at those times — keep
 the external pinger, or point an external cron at `POST /cron/tick` with header `X-Cron-Secret: $CRON_SECRET`.
 
-### Student agent (`Chatbot/`, used by `/ask`)
+### Student agent (`Chatbot/`, used by `/ask`) — no AI service
+
+Nothing in the bot calls an AI/LLM API (the OpenAI integration was removed on 2026-10-16).
 
 1. Load the class's course catalog from Supabase (cached per class ≤ `CATALOG_TTL_SECONDS`, default 60 s; cleared instantly after any CR write to that class).
-2. **One** structured-output LLM call extracts intent: verbatim course/teacher mentions, exam types, kind of time range, requested fields. The prompt contains no course, teacher or date data.
-3. Unambiguous time phrases ("next week", "this week", "tomorrow", explicit dates, "Sunday to Thursday") are detected by rules and override the LLM.
-4. Mentions are resolved deterministically against the class's catalog: code → exact title/alias → acronym → department prefix → word match → fuzzy. Several plausible courses → the bot asks which one.
-5. Dates are computed in Python for Asia/Dhaka, then **one** filtered, sorted `exam_details` query runs, always filtered by `class_id`.
-6. The reply is formatted from the rows (nothing generated), split at record boundaries under Discord's 2000-character limit.
+2. A rule-based parser (`intent.heuristic_parse`) extracts exam types, the kind of time range ("next week", "tomorrow", explicit dates, "Sunday to Thursday"…), section and requested fields; course mentions are found by scanning the message against the catalog.
+3. Mentions are resolved deterministically against the class's catalog: code → exact title/alias → acronym → department prefix → word match → fuzzy. Several plausible courses → the bot asks which one.
+4. Dates are computed in Python for Asia/Dhaka, then **one** filtered, sorted `exam_details` query runs, always filtered by `class_id`.
+5. The reply is formatted from the rows (nothing generated), split at record boundaries under Discord's 2000-character limit.
 
-If the LLM is unavailable a rule-based parser takes over. Database failures are reported as such, never as "no exams".
+Database failures are reported as such, never as "no exams".
 
 **Weeks**: the academic week is Sunday–Thursday. Today is always taken in Asia/Dhaka.
 
@@ -220,12 +225,11 @@ Run a **single instance** for the in-process scheduler to be cheap (several are 
 | `WEEKLY_UPDATE_TIME`, `EXAM_REMINDER_TIME` | optional | `HH:MM` Asia/Dhaka; defaults 18:00 and 20:00. |
 | `SCHEDULER_ENABLED` | optional | `0` turns the in-process scheduler off (e.g. when only an external cron should run it). |
 | `CRON_SECRET` | optional | Enables `POST /cron/tick` (header `X-Cron-Secret`). |
-| `OPENAI_API_KEY`, `MODEL` | optional | For `/ask`. Without them the rule-based parser is used. |
 | `CORS_ALLOW_ORIGINS` | recommended | Comma-separated web app origins. Unset = `*` (the editor uses bearer tokens, not cookies). |
 | `CORS_ALLOW_ORIGIN_REGEX` | optional | e.g. `https://ai-.*-sabit166s-projects\.vercel\.app` for Vercel previews. |
 | `CATALOG_TTL_SECONDS`, `PUBLIC_CACHE_SECONDS` | optional | Defaults 60 and 30. |
 
-The old `PAGE_ACCESS_TOKEN`, `MESSENGER_APP_SECRET` and `MESSENGER_VERIFY_TOKEN` are no longer read; remove them.
+The old `PAGE_ACCESS_TOKEN`, `MESSENGER_APP_SECRET`, `MESSENGER_VERIFY_TOKEN`, `OPENAI_API_KEY`, `MODEL` and `GEMINI_API_KEY` are no longer read; remove them.
 
 Vercel (`AI_CR/`):
 

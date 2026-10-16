@@ -386,36 +386,36 @@ def test_agent_weekly_and_filters_against_real_db():
     cache = CatalogCache(ttl=0)
     tuesday_before = (sunday - timedelta(days=5)).isoformat() + 'T10:00'
 
-    reply = answer('What exams are scheduled next week?', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    reply = answer('What exams are scheduled next week?', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     text = reply.text
     ours = [line for line in text.splitlines() if f'{p}-30' in line]
     assert len(ours) == 3, text
     assert text.index('CT 1') < text.index('Lab Test') < text.index('CT 2')
     assert 'CT 3' not in text
     assert 'Ch 1\nCh 2' in text
-    assert reply.metrics.llm_calls == 0 and reply.metrics.db_calls == 3   # 2 catalog + 1 exam query
+    assert reply.metrics.db_calls == 3   # 2 catalog + 1 exam query
 
     # Both-sections / whole-class exams show for every section; sectioned ones only for theirs.
-    section_a = answer('next week exams for section A', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    section_a = answer('next week exams for section A', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert all(t in section_a.text for t in ('CT 1', 'Lab Test')), section_a.text
     ours = [block for block in section_a.text.split('\n\n') if f'{p}-301' in block]
     assert ours and not any('CT 2' in block for block in ours)   # CT 2 is Section B only
-    section_b = answer(f'next week exams of {p}-302 for section B', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    section_b = answer(f'next week exams of {p}-302 for section B', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert 'Lab Test' not in section_b.text
 
     teacher = db_fetch.fetch_faculty(CID())
     second_name = next(f['name'] for f in teacher if f['id'] == fac[1])
-    by_teacher = answer(f'next week exams of {second_name} sir', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    by_teacher = answer(f'next week exams of {second_name} sir', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert 'CT 2' in by_teacher.text and 'Lab Test' in by_teacher.text   # Lab: via course faculty; CT 2: Section B
     assert 'CT 2 · Course Section B' in by_teacher.text
 
-    exact_title = answer(f'next quantum widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    exact_title = answer(f'next quantum widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert exact_title.outcome == 'answered' and 'Lab Test' not in exact_title.text   # exact title wins
 
-    ambiguous = answer(f'next widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    ambiguous = answer(f'next widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert ambiguous.outcome == 'clarify'
 
-    by_type = answer(f'next widgets {tag} CT', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    by_type = answer(f'next widgets {tag} CT', class_id=CID(), clock=clock_at(tuesday_before), cache=cache)
     assert by_type.outcome == 'answered' and 'CT 1' in by_type.text
 
 
@@ -449,7 +449,7 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
     assert bad.status_code == 422
 
     asked_on = (far_week(30) - timedelta(days=3)).isoformat() + 'T10:00'
-    reply = answer(f'next applied things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
+    reply = answer(f'next applied things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache)
     assert reply.outcome == 'answered', reply.text
     assert f'{p}-211' in reply.text and 'Unit 1' in reply.text
 
@@ -457,7 +457,7 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
                            json={'code': f'{p}-211', 'title': f'Renamed Things {p}',
                                  'section_faculty': {'A': fac[0], 'B': fac[1]}})
     assert renamed.status_code == 200
-    reply = answer(f'next renamed things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
+    reply = answer(f'next renamed things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache)
     assert f'Renamed Things {p}' in reply.text
 
     listed = client.get('/api/exams', headers=headers, params={'course_id': cid})

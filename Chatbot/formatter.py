@@ -22,7 +22,7 @@ HELP_TEXT = (
     "• /ask When is the next CT of <course>?\n"
     "• /ask Syllabus for tomorrow's exam\n"
     "• /ask All upcoming exams of <course code>\n"
-    "Or use /this-week, /next-week, /next-exam-day and /next-exam-notes."
+    "Or use /next-week-update, /this-week-update, /next-exam-day-update and /next-exam-notes."
 )
 OFF_TOPIC_TEXT = (
     "I can only help with exam information — dates, syllabus, teachers and venues for your courses. "

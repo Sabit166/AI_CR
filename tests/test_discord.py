@@ -92,23 +92,73 @@ def test_body_tampering_is_rejected(bot):
 # --- Commands -------------------------------------------------------------------
 def test_commands_are_registered_for_servers_only():
     names = {c['name'] for c in COMMANDS}
-    assert {'setup', 'this-week', 'next-week', 'next-exam-day', 'next-exam-notes', 'exams', 'manage', 'ask'} == names
+    assert {'setup', 'next-week-update', 'this-week-update', 'next-exam-day-update', 'next-exam-notes', 'exams',
+            'manage', 'ask'} == names
     assert all(c['contexts'] == [0] for c in COMMANDS)
     assert next(c for c in COMMANDS if c['name'] == 'setup')['default_member_permissions'] == MANAGE_CHANNELS
 
 
-@pytest.mark.parametrize('name,expect', [
-    ('this-week', 'exams'), ('next-week', "Next week's exams"), ('next-exam-day', 'Next exam day'),
-    ('next-exam-notes', 'Notes for the next exam day'),
-])
-def test_update_commands_reply_privately(bot, name, expect):
+UPDATES = [
+    ('next-week-update', "Next week's exams"), ('this-week-update', 'exams'),
+    ('next-exam-day-update', 'Next exam day'), ('next-exam-notes', 'Notes for the next exam day'),
+]
+
+
+@pytest.fixture
+def channel_posts(monkeypatch):
+    interactions._recent_posts.clear()
+    posts = []
+    monkeypatch.setattr(discord, 'post_messages', lambda channel, messages: posts.append((channel, messages)))
+    return posts
+
+
+@pytest.mark.parametrize('name,expect', UPDATES)
+def test_student_sees_the_update_privately(bot, channel_posts, name, expect):
     reply = run(bot, name)
     assert reply['ephemeral'] and reply['token'] == 'itoken'
     assert expect in '\n'.join(reply['messages'])
+    assert channel_posts == []
+
+
+@pytest.mark.parametrize('name,expect', UPDATES)
+def test_cr_posts_the_update_for_everyone(bot, channel_posts, name, expect):
+    reply = run(bot, name, permissions=MANAGE_CHANNELS)
+    assert channel_posts and channel_posts[0][0] == CHANNEL
+    assert expect in '\n'.join(channel_posts[0][1])
+    assert 'Posted in the channel for everyone' in reply['messages'][0]
+
+
+def test_cr_role_member_posts_too(bot, channel_posts):
+    bot.classes[CHANNEL]['cr_role_id'] = CR_ROLE
+    run(bot, 'next-week-update', roles=(CR_ROLE,))
+    assert len(channel_posts) == 1
+
+
+def test_cr_post_in_a_thread_goes_to_that_thread(bot, channel_posts):
+    thread = '900000000000000077'
+    run(bot, 'next-week-update', permissions=MANAGE_CHANNELS, channel=thread,
+        channel_obj={'id': thread, 'type': 11, 'parent_id': CHANNEL})
+    assert channel_posts[0][0] == thread
+
+
+def test_cr_double_run_posts_once(bot, channel_posts):
+    run(bot, 'next-week-update', permissions=MANAGE_CHANNELS)
+    reply = run(bot, 'next-week-update', permissions=MANAGE_CHANNELS)
+    assert len(channel_posts) == 1 and 'just posted' in reply['messages'][0]
+
+
+def test_cr_post_without_channel_access_still_shows_the_update(bot, monkeypatch):
+    interactions._recent_posts.clear()
+
+    def denied(channel, messages):
+        raise discord.DiscordError('403', status=403, code=discord.MISSING_ACCESS)
+    monkeypatch.setattr(discord, 'post_messages', denied)
+    reply = run(bot, 'next-week-update', permissions=MANAGE_CHANNELS)
+    assert 'Send Messages' in reply['messages'][0] and "Next week's exams" in '\n'.join(reply['messages'])
 
 
 def test_unconfigured_channel(bot):
-    reply = run(bot, 'next-week', channel=NEW_CHANNEL)
+    reply = run(bot, 'next-week-update', channel=NEW_CHANNEL)
     assert '/setup' in reply['messages'][0]
 
 
@@ -159,11 +209,11 @@ def test_database_outage_is_reported(bot, monkeypatch):
     def down(ch):
         raise db_fetch.DatabaseError('down', code='unavailable')
     monkeypatch.setattr(db_fetch, 'fetch_class_by_channel', down)
-    assert "couldn't reach the exam database" in run(bot, 'next-week')['messages'][0]
+    assert "couldn't reach the exam database" in run(bot, 'next-week-update')['messages'][0]
 
 
 def test_dm_is_refused(bot):
-    assert "class's channel" in run(bot, 'next-week', guild=None)['messages'][0]
+    assert "class's channel" in run(bot, 'next-week-update', guild=None)['messages'][0]
 
 
 # --- /setup ----------------------------------------------------------------------

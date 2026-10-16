@@ -275,8 +275,8 @@ function ClassBoard({ classKey }) {
 
         <footer className="student-footer">
           <p>
-            Have a question? Ask in your class channel on Discord: <strong>/ask</strong>, <strong>/next-exam-day</strong>,{' '}
-            <strong>/next-week</strong>…
+            Have a question? Ask in your class channel on Discord: <strong>/ask</strong>, <strong>/next-exam-day-update</strong>,{' '}
+            <strong>/next-week-update</strong>…
           </p>
           <p className="muted small">
             This list is read-only. Spotted a mistake? Tell your CR. · <a href="/privacy.html">Privacy</a>

@@ -33,7 +33,6 @@ def _jwt(role: str) -> str:
 os.environ.update({
     'SUPABASE_URL': 'http://localhost:54321',
     'SUPABASE_API_KEY': _jwt('service_role'),
-    'OPENAI_API_KEY': '', 'MODEL': '',
     'DISCORD_BOT_TOKEN': '', 'SCHEDULER_ENABLED': '0',
     'EDITOR_LINK_SECRET': 'e2e-editor-link-secret-0123456789abcdef',
     'SITE_URL': APP,

@@ -265,7 +265,8 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
 
   await step('post next week and a single exam to Discord, after confirming', async () => {
     const before = (await (await fetch('http://127.0.0.1:8011/e2e/posts')).json()).length
-    await page.getByRole('button', { name: '📣 This week' }).click()
+    assert.equal(await page.getByRole('button', { name: /This week|Next week/ }).count(), 0, 'week updates are posted from Discord')
+    await page.getByRole('button', { name: '📣 Next exam notes' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
     await page.getByRole('dialog').waitFor({ state: 'hidden' })
     await page.getByRole('button', { name: '📣 Next exam day' }).click()

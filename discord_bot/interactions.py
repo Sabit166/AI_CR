@@ -88,7 +88,8 @@ class Context:
     command: str
     options: dict
     guild_id: str | None
-    channel_id: str
+    channel_id: str              # the class's channel (a thread's parent)
+    reply_channel_id: str        # where the command was run (may be a thread)
     user_id: str
     permissions: int
     roles: list[str]
@@ -113,6 +114,7 @@ def context_of(interaction: dict) -> Context:
         options={o['name']: o.get('value') for o in data.get('options') or []},
         guild_id=interaction.get('guild_id'),
         channel_id=str(channel_id),
+        reply_channel_id=str(interaction.get('channel_id') or channel_id),
         user_id=str(user.get('id', '')),
         permissions=int(member.get('permissions') or 0),
         roles=[str(r) for r in member.get('roles') or []],
@@ -162,14 +164,17 @@ def dispatch(ctx: Context) -> Answer:
         return Answer([NOT_SET_UP])
     now = dr.now_local()
 
-    if ctx.command == 'this-week':
-        return Answer(updates.week_update(cls['id'], 'this', now).messages)
-    if ctx.command == 'next-week':
-        return Answer(updates.week_update(cls['id'], 'next', now).messages)
-    if ctx.command == 'next-exam-day':
-        return Answer(updates.next_exam_day_update(cls['id'], now).messages)
-    if ctx.command == 'next-exam-notes':
-        return Answer(updates.next_exam_day_update(cls['id'], now, notes_only=True).messages)
+    builders = {
+        'next-week-update': lambda: updates.week_update(cls['id'], 'next', now),
+        'this-week-update': lambda: updates.week_update(cls['id'], 'this', now),
+        'next-exam-day-update': lambda: updates.next_exam_day_update(cls['id'], now),
+        'next-exam-notes': lambda: updates.next_exam_day_update(cls['id'], now, notes_only=True),
+    }
+    if ctx.command in builders:
+        update = builders[ctx.command]()
+        if is_cr(ctx, cls):
+            return post_for_everyone(ctx, cls, update)
+        return Answer(update.messages)
     if ctx.command == 'exams':
         return Answer([f"📋 Upcoming exams for **{updates.escape(cls['name'])}** — dates, times, syllabus and notes."],
                       client.link_button('Open exam list', links.board_url(cls['view_key'])))
@@ -179,6 +184,26 @@ def dispatch(ctx: Context) -> Answer:
         question = str(ctx.options.get('question') or '')
         return Answer(answer(question, class_id=cls['id']).messages)
     return Answer(['Unknown command. It may have been removed; try again in a minute.'])
+
+
+POST_COOLDOWN_SECONDS = 20
+_recent_posts: dict[tuple[str, str], float] = {}
+
+
+def post_for_everyone(ctx: Context, cls: dict, update: updates.Update) -> Answer:
+    """A CR's update goes into the channel; the CR gets a private confirmation."""
+    key = (ctx.reply_channel_id, ctx.command)
+    if time.monotonic() - _recent_posts.get(key, -1e9) < POST_COOLDOWN_SECONDS:
+        return Answer(['That update was just posted here. Wait a few seconds to post it again.'])
+    _recent_posts[key] = time.monotonic()
+    try:
+        client.post_messages(ctx.reply_channel_id, update.messages)
+    except client.DiscordError as error:
+        _recent_posts.pop(key, None)
+        logger.warning('class %s: /%s not posted: %s', cls['id'], ctx.command, error)
+        return Answer([f'Not posted: {error.friendly()} Here it is just for you:', *update.messages])
+    exams = f"{update.exam_count} exam{'s' if update.exam_count != 1 else ''}"
+    return Answer([f'✅ Posted in the channel for everyone ({exams}).'])
 
 
 def manage(ctx: Context, cls: dict) -> Answer:
@@ -249,6 +274,8 @@ def setup(ctx: Context) -> Answer:
                 if cls.get('auto_updates') else 'Automatic updates are **off** for this channel.')
     return Answer([
         f"✅ This channel is now **{updates.escape(cls['name'])}** ({verb}).\n\n"
-        "**Everyone:** `/this-week`, `/next-week`, `/next-exam-day`, `/next-exam-notes`, `/exams`, `/ask`\n"
-        f"**CRs** ({crs} with Manage Channels): `/manage` opens the editor.\n\n{schedule}"
+        "**Everyone:** `/next-week-update`, `/this-week-update`, `/next-exam-day-update`, `/next-exam-notes`, "
+        "`/exams`, `/ask`\n"
+        f"**CRs** ({crs} with Manage Channels): the four update commands post for everyone, and `/manage` "
+        f"opens the editor.\n\n{schedule}"
     ], client.link_button('Open exam list', links.board_url(cls['view_key'])))
