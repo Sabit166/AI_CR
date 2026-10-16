@@ -238,9 +238,14 @@ def setup(ctx: Context) -> Answer:
         changes['auto_updates'] = bool(ctx.options['auto_updates'])
 
     existing = db_fetch.fetch_class_by_channel(ctx.channel_id)
+    inactive = None if existing else db_fetch.fetch_inactive_class_by_channel(ctx.channel_id)
     if existing:
         cls = db_fetch.update_class(existing['id'], changes)
         verb = 'updated'
+    elif inactive:
+        # The bot was removed from this server (or lost the channel) and is back.
+        cls = db_fetch.reactivate_class(inactive['id'], {**changes, 'discord_guild_id': db_fetch.snowflake(ctx.guild_id)})
+        verb = 'restored with its earlier courses and exams'
     elif ctx.options.get('use_existing_data'):
         cls = None
         for candidate in db_fetch.fetch_unlinked_classes():

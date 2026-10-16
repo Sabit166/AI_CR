@@ -12,7 +12,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import date, time as dtime
+from datetime import date, datetime, time as dtime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -450,6 +450,38 @@ def update_class(class_id: int, changes: dict, *, only_if_unlinked: bool = False
     if only_if_unlinked:
         params.append(('discord_channel_id', 'is.null'))
     rows = _rest('PATCH', 'classes', params, changes, prefer='return=representation') or []
+    return rows[0] if rows else None
+
+
+def fetch_discord_classes() -> list[dict]:
+    """Active classes linked to a Discord server (for checking the bot is still there)."""
+    return _rest('GET', 'classes', [
+        ('select', CLASS_FIELDS), ('archived_at', 'is.null'), ('discord_guild_id', 'not.is.null'), ('order', 'id.asc'),
+    ]) or []
+
+
+def deactivate_class(class_id: int) -> bool:
+    """The bot left the class's server or its channel is gone: hide the class (board and
+    editor links stop working, no automatic posts). Its data is kept; /setup in the same
+    channel restores it."""
+    rows = _rest('PATCH', 'classes', [('id', f'eq.{int(class_id)}'), ('archived_at', 'is.null'), ('select', 'id')],
+                 {'archived_at': datetime.now(timezone.utc).isoformat()}, prefer='return=representation') or []
+    return bool(rows)
+
+
+def fetch_inactive_class_by_channel(channel_id: str) -> dict | None:
+    rows = _rest('GET', 'classes', [
+        ('select', CLASS_FIELDS), ('archived_at', 'not.is.null'), ('discord_channel_id', f'eq.{snowflake(channel_id)}'),
+    ]) or []
+    return rows[0] if rows else None
+
+
+def reactivate_class(class_id: int, changes: dict) -> dict | None:
+    if set(changes) - CLASS_UPDATABLE:
+        raise ValueError(f'Unknown class fields: {sorted(set(changes) - CLASS_UPDATABLE)}')
+    rows = _rest('PATCH', 'classes', [('id', f'eq.{int(class_id)}'), ('archived_at', 'not.is.null'),
+                                      ('select', CLASS_FIELDS)],
+                 {**changes, 'archived_at': None}, prefer='return=representation') or []
     return rows[0] if rows else None
 
 

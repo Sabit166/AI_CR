@@ -60,7 +60,8 @@ def _unavailable() -> HTTPException:
 
 
 NOT_FOUND = HTTPException(status_code=404, detail={
-    'message': 'This class link is not valid. Use /exams in your class channel on Discord for the right one.'})
+    'message': 'This class link is not valid or the class is no longer active. '
+               'Use /exams in your class channel on Discord for the right one.'})
 
 
 def _cache_headers(response: Response) -> None:

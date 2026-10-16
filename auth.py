@@ -67,5 +67,7 @@ def require_cr(authorization: str | None = Header(default=None)) -> CRSession:
     except db_fetch.DatabaseError as error:
         raise HTTPException(status_code=503, detail={'message': 'Could not check your link right now. Please try again.'}) from error
     if info is None:
-        raise HTTPException(status_code=403, detail={'message': 'This class no longer exists.'})
+        raise HTTPException(status_code=403, detail={'message': (
+            'This class is no longer active: the bot was removed from its server or channel. '
+            'Add the bot back and run /setup in the class channel to restore it.')})
     return CRSession(claims.class_id, claims.user_id, info, claims.expires_at)

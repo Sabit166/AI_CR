@@ -6,6 +6,8 @@
 
 *Type a slash command in your class channel. Get the answer straight from what your CR posted.*
 
+<a href="https://discord.com/oauth2/authorize?client_id=1560680277808910479"><img src="https://img.shields.io/badge/Add%20to%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Add AI CR to Discord" height="40"></a>
+
 </div>
 
 ---
@@ -15,7 +17,7 @@
 - [What is AI CR?](#-what-is-ai-cr)
 - [For students](#-for-students)
 - [For class representatives](#-for-class-representatives)
-- [Setting up a new class](#-setting-up-a-new-class)
+- [Adding the bot and setting up a class](#-setting-up-a-new-class)
 - [How the week works](#-how-the-week-works)
 - [Frequently asked questions](#-frequently-asked-questions)
 
@@ -181,9 +183,21 @@ confirm, and each upcoming exam has a **📣 Post** button that announces just t
 
 ## 🧭 Setting up a new class
 
+### Add the bot to your server
+
+<a href="https://discord.com/oauth2/authorize?client_id=1560680277808910479"><img src="https://img.shields.io/badge/Add%20to%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Add AI CR to Discord" height="40"></a>
+
+Click **Add to Discord** (or open **https://discord.com/oauth2/authorize?client_id=1560680277808910479**), pick your
+server and press **Authorize**. You need the **Manage Server** permission there.
+
+As soon as it joins, the bot posts a short setup guide in the server's welcome channel (or the first channel it can
+write in).
+
+### Make a channel a class
+
 Anyone with **Manage Channels** in the class's channel (usually the server admin or a CR):
 
-1. Make sure the bot is in your server and can **view** the channel and **send messages** in it.
+1. Make sure the bot can **view** the channel and **send messages** in it (check the channel's permissions if it's private).
 2. In the channel, run **`/setup name:<class name>`** — for example `/setup name:CSE 22 Section A`.
    - Add **`cr_role:`** to choose a role whose members count as CRs.
    - Add **`auto_updates:False`** if you don't want the automatic Friday and evening posts.
@@ -191,6 +205,13 @@ Anyone with **Manage Channels** in the class's channel (usually the server admin
 
 Run `/setup` again in the same channel to rename the class or change the CR role. Every channel you set up is a
 separate class with its own courses, exams and exam list.
+
+### If the bot is removed
+
+Within a few minutes of the bot being removed from a server (or a class's channel being deleted), that server's
+classes are switched off: no more automatic posts, and their exam list and editor links stop working. **Nothing is
+deleted.** Add the bot back and run `/setup` in the same channel, and the class returns with all its courses and
+exams.
 
 ---
 

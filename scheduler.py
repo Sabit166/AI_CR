@@ -10,11 +10,18 @@
 (main.py) and can also be triggered externally (POST /cron/tick). Each post is
 claimed in public.class_notifications before sending, so it goes out once per
 class even with restarts, several instances or both triggers at the same time.
+
+Every RECONCILE_SECONDS the tick also checks which servers the bot is still in
+(Discord sends HTTP-only bots no event when they are removed) and deactivates
+the classes of servers it has left; a post that fails because the channel was
+deleted deactivates that class too. Deactivated classes keep their data and
+come back with /setup in the same channel.
 """
 from __future__ import annotations
 
 import logging
 import os
+import time as clock
 from datetime import datetime, time, timedelta
 
 import date_ranges as dr
@@ -26,6 +33,8 @@ logger = logging.getLogger('aicr.scheduler')
 
 FRIDAY, SATURDAY = 4, 5
 TICK_SECONDS = 60
+RECONCILE_SECONDS = 300
+_last_reconcile = float('-inf')
 
 _finished: set[tuple[int, str]] = set()  # claims this process already saw; skips repeat queries
 
@@ -79,6 +88,11 @@ def _send(cls: dict, key: str, build) -> str:
     try:
         client.post_messages(cls['discord_channel_id'], update.messages)
     except client.DiscordError as error:
+        if error.code == client.UNKNOWN_CHANNEL:
+            db_fetch.release_notification(cls['id'], key)
+            db_fetch.deactivate_class(cls['id'])
+            logger.warning('class %s: channel %s no longer exists; class deactivated', cls['id'], cls['discord_channel_id'])
+            return 'deactivated'
         if error.permanent:
             db_fetch.finish_notification(cls['id'], key, 'failed', str(error))
             _remember(cls['id'], key)
@@ -99,9 +113,36 @@ def _remember(class_id: int, key: str) -> None:
     _finished.add((class_id, key))
 
 
+def deactivate_removed_servers() -> int:
+    """Deactivate every class whose server the bot is no longer in. Returns how many."""
+    try:
+        present = client.bot_guild_ids()
+    except client.DiscordError as error:
+        # Never guess from a failed request: that would deactivate every class.
+        logger.warning("could not list the bot's servers: %s", error)
+        return 0
+    removed = 0
+    for cls in db_fetch.fetch_discord_classes():
+        if cls['discord_guild_id'] not in present and db_fetch.deactivate_class(cls['id']):
+            removed += 1
+            logger.info('class %s (%s): bot is no longer in server %s; class deactivated',
+                        cls['id'], cls['name'], cls['discord_guild_id'])
+    return removed
+
+
 def run_tick(now: datetime | None = None) -> dict[str, int]:
+    global _last_reconcile
     now = now or dr.now_local()
     summary: dict[str, int] = {}
+    if clock.monotonic() - _last_reconcile >= RECONCILE_SECONDS:
+        _last_reconcile = clock.monotonic()
+        try:
+            removed = deactivate_removed_servers()
+        except db_fetch.DatabaseError as error:
+            logger.error('server check skipped, database error %s', error.code)
+            removed = 0
+        if removed:
+            summary['deactivated'] = removed
     try:
         classes = db_fetch.fetch_scheduled_classes()
     except db_fetch.DatabaseError as error:

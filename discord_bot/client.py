@@ -123,6 +123,18 @@ def post_messages(channel_id: str, messages: list[str]) -> None:
         request('POST', f'/channels/{channel_id}/messages', message_payload(content))
 
 
+def bot_guild_ids() -> set[str]:
+    """Every server the bot is currently in (paged, 200 per request)."""
+    ids: set[str] = set()
+    after = '0'
+    while True:
+        page = request('GET', f'/users/@me/guilds?limit=200&after={after}') or []
+        ids.update(str(g['id']) for g in page)
+        if len(page) < 200:
+            return ids
+        after = str(page[-1]['id'])
+
+
 # ---------------------------------------------------------------------------
 # Interaction responses (interaction token; valid for 15 minutes)
 # ---------------------------------------------------------------------------

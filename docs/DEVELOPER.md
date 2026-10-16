@@ -106,6 +106,18 @@ across restarts or several instances. Temporary Discord errors release the claim
 ones (no channel access) are marked `failed`. On Render's free plan the service must be awake at those times — keep
 the external pinger, or point an external cron at `POST /cron/tick` with header `X-Cron-Secret: $CRON_SECRET`.
 
+### Joining and leaving servers
+
+- **Joined** (`discord_bot/events.py`, `POST /discord/events`): Discord's signed `APPLICATION_AUTHORIZED` webhook
+  event (guild install) triggers a short setup guide, posted in the server's system channel or else the first text
+  channel the bot can write in. Answered with an empty 204; the message is sent in the background.
+- **Removed**: HTTP-only bots get no event for this (`APPLICATION_DEAUTHORIZED` carries no server), so every
+  `RECONCILE_SECONDS` (300) the scheduler lists the bot's servers (`GET /users/@me/guilds`) and deactivates
+  (`classes.archived_at = now()`) every active class in a server it's no longer in. A failed listing deactivates
+  nothing. A scheduled post failing with Unknown Channel (channel deleted) deactivates that class too.
+- **Deactivated** classes keep all their data; board and editor links answer "no longer active" and nothing is
+  posted. `/setup` in the same channel reactivates the class (`reactivate_class`) instead of creating a new one.
+
 ### Student agent (`Chatbot/`, used by `/ask`) — no AI service
 
 Nothing in the bot calls an AI/LLM API (the OpenAI integration was removed on 2026-10-16).
@@ -129,10 +141,13 @@ Database failures are reported as such, never as "no exams".
    (leave Message Content, Server Members and Presence off).
 4. **Installation**: Installation Contexts → **Guild Install** only. Default install settings for Guild Install:
    scopes `applications.commands` and `bot`; permissions **View Channels**, **Send Messages**,
-   **Send Messages in Threads**, **Embed Links**. Use the install link shown there to add the bot to your server.
+   **Send Messages in Threads**, **Embed Links**. Install link:
+   https://discord.com/oauth2/authorize?client_id=1560680277808910479 (**Bot** → **Public Bot** on lets anyone use it).
 5. **Deploy the backend** with the env vars below, then in **General Information** set
    **Interactions Endpoint URL** to `https://ai-cr.onrender.com/discord/interactions` and save. Discord sends a
    signed PING and an unsigned test request; saving succeeds only if both are answered correctly.
+   For the welcome message: **Webhooks** → **Endpoint URL** `https://ai-cr.onrender.com/discord/events`, turn
+   **Events** on, tick **Application Authorized**, save.
 6. **Register the slash commands** (again whenever `discord_bot/commands.py` changes):
    ```bash
    env/Scripts/python scripts/register_discord_commands.py               # all servers (may take a few minutes)
