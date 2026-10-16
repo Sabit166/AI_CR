@@ -2,7 +2,7 @@
 
 Every fact in a reply comes straight from a database row; nothing is generated.
 Missing values are stated as missing. Long replies are split on record
-boundaries so Messenger's 2000-character limit never cuts a record off.
+boundaries so Discord's 2000-character message limit never cuts a record off.
 """
 from __future__ import annotations
 
@@ -13,16 +13,16 @@ import date_ranges as dr
 from .catalog import Catalog
 from .retrieval import Plan, Result
 
-MESSENGER_LIMIT = 2000
+DISCORD_LIMIT = 2000
 CHUNK_BUDGET = 1900  # headroom for the "(1/3)" marker
 
 HELP_TEXT = (
     "Hi! I'm the class exam assistant. Ask me things like:\n"
-    "• What exams do we have next week?\n"
-    "• What's left this week?\n"
-    "• When is the next CT of <course>?\n"
-    "• Syllabus for tomorrow's exam\n"
-    "• All upcoming exams of <course code>"
+    "• /ask What exams do we have next week?\n"
+    "• /ask When is the next CT of <course>?\n"
+    "• /ask Syllabus for tomorrow's exam\n"
+    "• /ask All upcoming exams of <course code>\n"
+    "Or use /this-week, /next-week, /next-exam-day and /next-exam-notes."
 )
 OFF_TOPIC_TEXT = (
     "I can only help with exam information — dates, syllabus, teachers and venues for your courses. "

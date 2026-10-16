@@ -4,8 +4,9 @@ Start the stack first (never points at Supabase):
     docker compose -f tests/db/docker-compose.yml up -d --wait
 Skipped automatically when it is not running.
 
-Each test uses its own random course prefix and a far-future week, so tests
-don't interfere and can be re-run against the same container.
+Each test gets its own class (as if from its own Discord channel), a random course
+prefix and a far-future week, so tests don't interfere and can be re-run against
+the same container.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 import db_fetch
+import links
 from Chatbot.Chatbot import answer
 from Chatbot.catalog import CatalogCache
 from test_academic import CODE_VECTORS
@@ -52,10 +54,27 @@ def _reachable() -> bool:
 pytestmark = pytest.mark.skipif(not _reachable(), reason='test PostgREST not running (see tests/db/docker-compose.yml)')
 
 
+STATE: dict[str, int] = {}
+
+
+def snowflake() -> str:
+    return str(random.randint(10 ** 17, 10 ** 18 - 1))
+
+
+def new_class(name: str = 'Test class') -> dict:
+    return db_fetch.create_class(name=name, guild_id=snowflake(), channel_id=snowflake(), cr_role_id=None)
+
+
+def CID() -> int:
+    """The current test's class."""
+    return STATE['class_id']
+
+
 @pytest.fixture(autouse=True)
 def local_db(monkeypatch):
     monkeypatch.setenv('SUPABASE_URL', REST)
     monkeypatch.setenv('SUPABASE_API_KEY', _jwt('service_role'))
+    STATE['class_id'] = new_class()['id']
 
 
 def raw(method, path, role, body=None):
@@ -76,7 +95,7 @@ def prefix() -> str:
 
 def faculty(n: int) -> list[int]:
     tag = uuid.uuid4().hex[:6]
-    return [db_fetch.create_faculty(f'Teacher {tag} {i}')['id'] for i in range(n)]
+    return [db_fetch.create_faculty(CID(), f'Teacher {tag} {i}')['id'] for i in range(n)]
 
 
 def default_sections(code: str, faculty_ids: list[int]) -> dict[str, int]:
@@ -87,15 +106,15 @@ def default_sections(code: str, faculty_ids: list[int]) -> dict[str, int]:
 
 
 def course(code: str, title: str, faculty_ids: list[int], aliases=(), sections=None) -> int:
-    return db_fetch.save_course(course_id=None, code=code, title=title, aliases=list(aliases), faculty_ids=faculty_ids,
+    return db_fetch.save_course(class_id=CID(), course_id=None, code=code, title=title, aliases=list(aliases), faculty_ids=faculty_ids,
                                 section_faculty=default_sections(code, faculty_ids) if sections is None else sections)
 
 
 def exam(course_id, exam_type, day, *, time=None, section=None, course_section=None, syllabus=None, faculty_ids=(),
          request_id=None, exam_id=None):
-    return db_fetch.save_exam(exam_id=exam_id, course_id=course_id, exam_type=exam_type, exam_date=day, exam_time=time,
+    return db_fetch.save_exam(class_id=CID(), exam_id=exam_id, course_id=course_id, exam_type=exam_type, exam_date=day, exam_time=time,
                               section=section, course_section=course_section, syllabus=syllabus, venue=None, remarks=None,
-                              notes_link=None, faculty_ids=list(faculty_ids), client_request_id=request_id, user_id=None)
+                              notes_link=None, faculty_ids=list(faculty_ids), client_request_id=request_id, actor=None)
 
 
 def far_week(offset_weeks: int) -> date:
@@ -123,7 +142,9 @@ def test_legacy_backfill():
     assert legacy[4]['faculty_source'] == 'legacy'
     # Theoretical exams are whole-class: the rules migration cleared their legacy sections.
     assert all(r['section'] is None for r in legacy.values() if r['course_type'] == 'Theoretical')
-    sdp = next(c for c in db_fetch.fetch_active_courses() if c['code'] == 'CSE-464')
+    # The migration put the pre-Discord data in one class that no channel has claimed yet.
+    legacy_class = db_fetch.fetch_unlinked_classes()[0]['id']
+    sdp = next(c for c in db_fetch.fetch_active_courses(legacy_class) if c['code'] == 'CSE-464')
     assert sdp['title'] == 'Software Development Project-2' or 'Software Development Project-2' in sdp['aliases']
     assert sdp['course_type'] == 'Sessional'
 
@@ -138,9 +159,11 @@ def test_legacy_backfill():
     ('GET', 'Exams', None),
     ('POST', 'courses', {'code': 'HACK-101', 'title': 'Hack'}),
     ('DELETE', 'exams?id=gt.0', None),
-    ('POST', 'rpc/cr_save_course', {'p_course_id': None, 'p_code': 'HACK-101', 'p_title': 'Hack', 'p_aliases': [],
-                                    'p_faculty_ids': [], 'p_section_faculty': {}}),
-    ('POST', 'rpc/cr_remove_course', {'p_course_id': 1}),
+    ('GET', 'classes', None),
+    ('GET', 'class_notifications', None),
+    ('POST', 'rpc/cr_save_course', {'p_class_id': 1, 'p_course_id': None, 'p_code': 'HACK-101', 'p_title': 'Hack',
+                                    'p_aliases': [], 'p_faculty_ids': [], 'p_section_faculty': {}}),
+    ('POST', 'rpc/cr_remove_course', {'p_class_id': 1, 'p_course_id': 1}),
 ])
 def test_public_roles_cannot_read_or_write(role, method, path, body):
     status, text = raw(method, path, role, body)
@@ -174,7 +197,7 @@ def test_db_enforces_course_sections_even_without_backend_validation():
     assert [f['id'] for f in saved['faculty']] == [one]
     assert {s: f['id'] for s, f in saved['section_faculty'].items()} == {'A': one, 'B': one}
     # Re-assigning sections replaces the teachers.
-    db_fetch.save_course(course_id=cid, code=f'{p}-301', title='Theory', aliases=[], faculty_ids=[],
+    db_fetch.save_course(class_id=CID(), course_id=cid, code=f'{p}-301', title='Theory', aliases=[], faculty_ids=[],
                          section_faculty={'A': two, 'B': one})
     saved = db_fetch.fetch_course(cid)
     assert {s: f['id'] for s, f in saved['section_faculty'].items()} == {'A': two, 'B': one}
@@ -195,7 +218,7 @@ def test_duplicate_active_course_rejected_but_archived_code_reusable():
         course(f'{p.lower()} 301', 'Again', fac)
     assert err.value.code == 'duplicate'
     exam(first, 'CT 1', far_week(1))
-    assert db_fetch.remove_course(first) == 'archived'
+    assert db_fetch.remove_course(CID(), first) == 'archived'
     assert course(f'{p}-301', 'Next term', fac)
 
 
@@ -204,11 +227,11 @@ def test_remove_course_keeps_history():
     used = course(f'{p}-301', 'Used', faculty(2))
     unused = course(f'{p}-303', 'Unused', faculty(2))
     exam_id = exam(used, 'CT 1', far_week(2), syllabus='kept')
-    assert db_fetch.remove_course(used) == 'archived'
-    assert db_fetch.remove_course(unused) == 'deleted'
+    assert db_fetch.remove_course(CID(), used) == 'archived'
+    assert db_fetch.remove_course(CID(), unused) == 'deleted'
     kept = db_fetch.get_exam(exam_id)
     assert kept['syllabus'] == 'kept' and kept['course_archived'] is True
-    assert all(c['id'] != used for c in db_fetch.fetch_active_courses())
+    assert all(c['id'] != used for c in db_fetch.fetch_active_courses(CID()))
 
 
 def test_code_change_that_flips_type_is_blocked_once_exams_exist():
@@ -217,11 +240,11 @@ def test_code_change_that_flips_type_is_blocked_once_exams_exist():
     cid = course(f'{p}-301', 'Theory', fac)
     exam(cid, 'CT 1', far_week(3))
     with pytest.raises(db_fetch.DatabaseError) as err:
-        db_fetch.save_course(course_id=cid, code=f'{p}-302', title='Theory', aliases=[], faculty_ids=fac,
+        db_fetch.save_course(class_id=CID(), course_id=cid, code=f'{p}-302', title='Theory', aliases=[], faculty_ids=fac,
                              section_faculty={})
     assert err.value.code == 'course_type_locked'
     # Same-type rename is fine
-    db_fetch.save_course(course_id=cid, code=f'{p}-305', title='Renamed', aliases=[], faculty_ids=[],
+    db_fetch.save_course(class_id=CID(), course_id=cid, code=f'{p}-305', title='Renamed', aliases=[], faculty_ids=[],
                          section_faculty=default_sections(f'{p}-305', fac))
     assert db_fetch.fetch_course(cid)['code'] == f'{p}-305'
 
@@ -231,12 +254,12 @@ def test_faculty_removal_rules():
     fac = faculty(2)
     cid = course(f'{p}-302', 'Lab', fac)
     with pytest.raises(db_fetch.DatabaseError) as err:
-        db_fetch.remove_faculty(fac[0])
+        db_fetch.remove_faculty(CID(), fac[0])
     assert err.value.code == 'in_use'
     exam(cid, 'Lab Test', far_week(4), faculty_ids=[fac[0]])
-    db_fetch.remove_course(cid)
-    assert db_fetch.remove_faculty(fac[0]) == 'archived'      # still referenced by history
-    assert db_fetch.remove_faculty(faculty(1)[0]) == 'deleted'
+    db_fetch.remove_course(CID(), cid)
+    assert db_fetch.remove_faculty(CID(), fac[0]) == 'archived'      # still referenced by history
+    assert db_fetch.remove_faculty(CID(), faculty(1)[0]) == 'deleted'
 
 
 # --- Exam rules in the database --------------------------------------------------
@@ -363,7 +386,7 @@ def test_agent_weekly_and_filters_against_real_db():
     cache = CatalogCache(ttl=0)
     tuesday_before = (sunday - timedelta(days=5)).isoformat() + 'T10:00'
 
-    reply = answer('What exams are scheduled next week?', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    reply = answer('What exams are scheduled next week?', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     text = reply.text
     ours = [line for line in text.splitlines() if f'{p}-30' in line]
     assert len(ours) == 3, text
@@ -373,26 +396,26 @@ def test_agent_weekly_and_filters_against_real_db():
     assert reply.metrics.llm_calls == 0 and reply.metrics.db_calls == 3   # 2 catalog + 1 exam query
 
     # Both-sections / whole-class exams show for every section; sectioned ones only for theirs.
-    section_a = answer('next week exams for section A', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    section_a = answer('next week exams for section A', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert all(t in section_a.text for t in ('CT 1', 'Lab Test')), section_a.text
     ours = [block for block in section_a.text.split('\n\n') if f'{p}-301' in block]
     assert ours and not any('CT 2' in block for block in ours)   # CT 2 is Section B only
-    section_b = answer(f'next week exams of {p}-302 for section B', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    section_b = answer(f'next week exams of {p}-302 for section B', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert 'Lab Test' not in section_b.text
 
-    teacher = db_fetch.fetch_faculty()
+    teacher = db_fetch.fetch_faculty(CID())
     second_name = next(f['name'] for f in teacher if f['id'] == fac[1])
-    by_teacher = answer(f'next week exams of {second_name} sir', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    by_teacher = answer(f'next week exams of {second_name} sir', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert 'CT 2' in by_teacher.text and 'Lab Test' in by_teacher.text   # Lab: via course faculty; CT 2: Section B
     assert 'CT 2 · Course Section B' in by_teacher.text
 
-    exact_title = answer(f'next quantum widgets {tag} exam', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    exact_title = answer(f'next quantum widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert exact_title.outcome == 'answered' and 'Lab Test' not in exact_title.text   # exact title wins
 
-    ambiguous = answer(f'next widgets {tag} exam', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    ambiguous = answer(f'next widgets {tag} exam', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert ambiguous.outcome == 'clarify'
 
-    by_type = answer(f'next widgets {tag} CT', clock=clock_at(tuesday_before), cache=cache, use_llm=False)
+    by_type = answer(f'next widgets {tag} CT', class_id=CID(), clock=clock_at(tuesday_before), cache=cache, use_llm=False)
     assert by_type.outcome == 'answered' and 'CT 1' in by_type.text
 
 
@@ -404,14 +427,12 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
     from Chatbot.catalog import catalog_cache
 
     auth.clear_auth_cache()
-    monkeypatch.setattr(db_fetch, 'fetch_auth_user', lambda token: {'id': '33333333-3333-3333-3333-333333333333'})
-    monkeypatch.setattr(db_fetch, 'is_cr_member', lambda uid: True)
     client = TestClient(main.app)
-    headers = {'Authorization': 'Bearer t'}
+    headers = {'Authorization': f'Bearer {links.make_editor_token(CID(), "123456789012345678")}'}
 
     p = prefix()
     fac = [client.post('/api/faculty', headers=headers, json={'name': f'Dr {p} {i}'}).json()['id'] for i in range(2)]
-    catalog_cache.get()  # warm the cache before the course exists
+    catalog_cache.get(CID())  # warm the cache before the course exists
     created = client.post('/api/courses', headers=headers,
                           json={'code': f'{p.lower()} 211', 'title': f'Applied Things {p}',
                                 'section_faculty': {'A': fac[0], 'B': fac[0]}})
@@ -428,7 +449,7 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
     assert bad.status_code == 422
 
     asked_on = (far_week(30) - timedelta(days=3)).isoformat() + 'T10:00'
-    reply = answer(f'next applied things {p.lower()} exam', clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
+    reply = answer(f'next applied things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
     assert reply.outcome == 'answered', reply.text
     assert f'{p}-211' in reply.text and 'Unit 1' in reply.text
 
@@ -436,10 +457,93 @@ def test_cr_api_write_then_agent_sees_it_immediately(monkeypatch):
                            json={'code': f'{p}-211', 'title': f'Renamed Things {p}',
                                  'section_faculty': {'A': fac[0], 'B': fac[1]}})
     assert renamed.status_code == 200
-    reply = answer(f'next renamed things {p.lower()} exam', clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
+    reply = answer(f'next renamed things {p.lower()} exam', class_id=CID(), clock=clock_at(asked_on), cache=catalog_cache, use_llm=False)
     assert f'Renamed Things {p}' in reply.text
 
     listed = client.get('/api/exams', headers=headers, params={'course_id': cid})
     assert listed.status_code == 200 and len(listed.json()['exams']) == 1
     assert client.delete(f'/api/exams/{r1.json()["id"]}', headers=headers).json() == {'result': 'deleted'}
     assert client.delete(f'/api/exams/{r1.json()["id"]}', headers=headers).status_code == 404
+
+
+# --- Classes (one per Discord channel) ----------------------------------------------
+def test_classes_are_isolated_in_the_database():
+    mine = CID()
+    other = new_class('Other class')['id']
+    p = prefix()
+    fac = faculty(2)
+    cid = course(f'{p}-301', 'Theory', fac)
+    exam_id = exam(cid, 'CT 1', far_week(40), syllabus='mine')
+
+    # The same course code and teacher name may exist in another class.
+    STATE['class_id'] = other
+    other_fac = faculty(2)
+    assert course(f'{p}-301', 'Theory', other_fac)
+    assert db_fetch.create_faculty(other, db_fetch.fetch_faculty(mine)[0]['name'])
+
+    # Another class's course, teacher or exam can't be used, changed or removed from this class.
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        course(f'{p}-303', 'Theory', fac)                       # teachers of the first class
+    assert err.value.code == 'unknown_faculty'
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        exam(cid, 'CT 2', far_week(40))                         # the first class's course
+    assert err.value.code == 'invalid_course'
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        exam(cid, 'CT 1', far_week(41), exam_id=exam_id)        # the first class's exam
+    assert err.value.code == 'not_found'
+    with pytest.raises(db_fetch.DatabaseError) as err:
+        db_fetch.save_course(class_id=other, course_id=cid, code=f'{p}-301', title='Hijack', aliases=[],
+                             faculty_ids=[], section_faculty={'A': other_fac[0], 'B': other_fac[1]})
+    assert err.value.code == 'not_found'
+    for remove, target in ((db_fetch.remove_course, cid), (db_fetch.remove_faculty, fac[0])):
+        with pytest.raises(db_fetch.DatabaseError) as err:
+            remove(other, target)
+        assert err.value.code == 'not_found'
+    # Even a raw link with the service key goes through the trigger.
+    with pytest.raises(db_fetch.DatabaseError):
+        db_fetch._rest('POST', 'course_faculty', payload={'course_id': cid, 'faculty_id': other_fac[0]})
+
+    assert db_fetch.get_exam(exam_id)['syllabus'] == 'mine' and db_fetch.get_exam(exam_id)['class_id'] == mine
+    assert [r['id'] for r in db_fetch.query_exams(db_fetch.ExamQuery(class_id=other))] == []
+    assert [r['id'] for r in db_fetch.query_exams(db_fetch.ExamQuery(class_id=mine))] == [exam_id]
+    assert {c['code'] for c in db_fetch.fetch_active_courses(other)} == {f'{p}-301'}
+
+
+def test_class_lookup_and_settings():
+    created = new_class('Lookup class')
+    assert db_fetch.fetch_class_by_channel(created['discord_channel_id'])['id'] == created['id']
+    assert db_fetch.fetch_class_by_view_key(created['view_key'])['id'] == created['id']
+    assert created['auto_updates'] is True
+    with pytest.raises(db_fetch.DatabaseError) as err:   # one class per channel
+        db_fetch.create_class(name='Again', guild_id=snowflake(), channel_id=created['discord_channel_id'], cr_role_id=None)
+    assert err.value.code == 'duplicate'
+    updated = db_fetch.update_class(created['id'], {'auto_updates': False, 'name': 'Renamed'})
+    assert updated['name'] == 'Renamed' and created['id'] not in {c['id'] for c in db_fetch.fetch_scheduled_classes()}
+    # Linking only succeeds for a class without a channel.
+    assert db_fetch.update_class(created['id'], {'discord_channel_id': snowflake()}, only_if_unlinked=True) is None
+
+
+def test_notification_is_claimed_once():
+    key = f'weekly:{uuid.uuid4().hex[:8]}'
+    assert db_fetch.claim_notification(CID(), key) is True
+    assert db_fetch.claim_notification(CID(), key) is False
+    db_fetch.release_notification(CID(), key)
+    assert db_fetch.claim_notification(CID(), key) is True
+    db_fetch.finish_notification(CID(), key, 'sent', '2 exam(s)')
+    assert db_fetch.claim_notification(CID(), key) is False
+
+
+def test_updates_against_real_db():
+    import updates
+
+    p = prefix()
+    cid = course(f'{p}-301', 'Graph Things', faculty(2))
+    sunday = far_week(45)
+    exam(cid, 'CT 1', sunday + timedelta(days=1), time='09:00', syllabus='Trees')
+    exam(cid, 'CT 2', sunday + timedelta(days=1), time='13:00', course_section='A')
+    friday_before = clock_at((sunday - timedelta(days=2)).isoformat() + 'T18:00')()
+    week = updates.week_update(CID(), 'next', friday_before)
+    assert week.exam_count == 2 and 'Trees' in week.messages[0]
+    day = updates.next_exam_day_update(CID(), friday_before)
+    assert day.exam_count == 2 and '9:00 AM' in day.messages[0] and '1:00 PM' in day.messages[0]
+    assert updates.reminder_update(CID(), sunday + timedelta(days=1)).exam_count == 2

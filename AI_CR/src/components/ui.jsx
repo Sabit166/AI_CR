@@ -56,7 +56,7 @@ export function Toasts({ toasts, onDismiss }) {
   )
 }
 
-export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', busy = false, onConfirm, onCancel }) {
+export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', tone = 'danger', busy = false, onConfirm, onCancel }) {
   const ref = useRef(null)
   const titleId = useId()
 
@@ -83,7 +83,7 @@ export function ConfirmDialog({ open, title, children, confirmLabel = 'Delete', 
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+        <button type="button" className={`btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy}>
           {busy ? <Spinner label="Working…" /> : null}
           {confirmLabel}
         </button>

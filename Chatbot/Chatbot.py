@@ -7,12 +7,13 @@ Flow per message (at most 1 LLM call, normally 1-2 database calls):
   4. Compute the date range in Asia/Dhaka and run ONE filtered exam_details query.
   5. Format the rows deterministically (no generated facts).
 
-Run from the repo root:  python -m Chatbot.Chatbot "what exams do we have next week?"
+Everything is scoped to one class (a Discord channel): its catalog and its exams.
+
+Run from the repo root:  python -m Chatbot.Chatbot --class-id 1 "what exams do we have next week?"
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -85,6 +86,7 @@ def _normalize_fields(intent):
 def answer(
     message: str,
     *,
+    class_id: int,
     clock: dr.Clock | None = None,
     repo: ExamRepository = db_fetch,
     cache: CatalogCache = default_catalog_cache,
@@ -101,7 +103,7 @@ def answer(
             return BotReply([formatter.HELP_TEXT], outcome, source, metrics)
 
         now = dr.now_local(clock)
-        catalog = cache.get()
+        catalog = cache.get(class_id)
         intent = _parse(message, catalog.exam_type_names(), catalog, use_llm)
         source = intent.source
 
@@ -112,7 +114,7 @@ def answer(
             outcome = 'off_topic'
             return BotReply([formatter.OFF_TOPIC_TEXT], outcome, source, metrics)
 
-        plan = plan_query(intent, message, catalog, now)
+        plan = plan_query(intent, message, catalog, now, class_id)
         if plan.status in ('clarify_course', 'clarify_faculty'):
             outcome = 'clarify'
             return BotReply([formatter.format_clarification(plan)], outcome, source, metrics)
@@ -141,20 +143,15 @@ def answer(
         )
 
 
-async def chat(req: str) -> str:
-    """Backwards-compatible entry point: the full reply as one string."""
-    reply = await asyncio.to_thread(answer, req)
-    return reply.text
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description='Chat with the exam bot.')
     parser.add_argument('message', help='User message to evaluate')
+    parser.add_argument('--class-id', type=int, required=True, help='Class (public.classes.id) to answer for')
     parser.add_argument('--no-llm', action='store_true', help='Use the rule-based parser only')
     args = parser.parse_args()
 
-    reply = answer(args.message, use_llm=not args.no_llm)
+    reply = answer(args.message, class_id=args.class_id, use_llm=not args.no_llm)
     for part in reply.messages:
         print(part)
         print('-' * 40)

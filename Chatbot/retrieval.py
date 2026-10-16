@@ -42,6 +42,7 @@ class ExamRepository(Protocol):
 @dataclass
 class Plan:
     status: str                               # ok | clarify_course | unknown_course | clarify_faculty | unknown_faculty
+    class_id: int | None = None               # the class (Discord channel) asking
     mode: str = 'range'                       # range | next | upcoming | recent | match
     date_range: dr.DateRange | None = None
     label: str = ''                           # human description of the period, e.g. "next week"
@@ -64,7 +65,13 @@ class Result:
     next_available: dict | None = None        # when the range is empty: the next upcoming matching exam
 
 
-def plan_query(intent: Intent, message: str, catalog: Catalog, now: datetime) -> Plan:
+def plan_query(intent: Intent, message: str, catalog: Catalog, now: datetime, class_id: int | None = None) -> Plan:
+    plan = _plan(intent, message, catalog, now)
+    plan.class_id = class_id
+    return plan
+
+
+def _plan(intent: Intent, message: str, catalog: Catalog, now: datetime) -> Plan:
     today = now.date()
 
     resolution = resolve_courses(intent.course_mentions, message, catalog)
@@ -171,6 +178,7 @@ def _apply_time_scope(plan: Plan, intent: Intent, today: date) -> None:
 def _query(plan: Plan, **overrides) -> ExamQuery:
     base = dict(
         select=plan.select,
+        class_id=plan.class_id,
         course_ids=tuple(plan.course_ids) if plan.course_ids else None,
         exam_types=tuple(plan.exam_types) if plan.exam_types else None,
         faculty_ids=tuple(plan.faculty_ids) if plan.faculty_ids else None,

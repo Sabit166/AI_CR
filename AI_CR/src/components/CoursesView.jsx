@@ -66,7 +66,7 @@ export default function CoursesView({ data, notify, reloadCatalog }) {
         </button>
       </div>
       <p className="muted section-lead">
-        This term's courses. The Messenger bot and the exam form both read this list, so changes apply right away.
+        This term's courses for this class. The Discord bot and the exam form both read this list, so changes apply right away.
       </p>
 
       {data.courses.length === 0 ? (

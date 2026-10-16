@@ -1,4 +1,4 @@
-// Mobile-first UI end-to-end test (real backend + isolated Docker DB, fake Supabase Auth).
+// Mobile-first UI end-to-end test (real backend + isolated Docker DB; Discord posting captured).
 //
 //   docker compose -f tests/db/docker-compose.yml up -d --wait     (repo root)
 //   python tests/e2e/server.py                                      (repo root, port 8011)
@@ -26,56 +26,14 @@ const soon = new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10)
 const prefix = Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
 const results = []
 
-function fakeJwt(email) {
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
-  return `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: email, email, exp: 4102444800, role: 'authenticated', aud: 'authenticated' })}.sig`
+// Editor and board links for two classes, as the bot would hand them out (tests/e2e/server.py).
+const LINKS = await (await fetch('http://127.0.0.1:8011/e2e/links')).json()
+
+async function openEditor(page, link = LINKS.mine.editor) {
+  await page.goto(link)
 }
 
-async function fakeSupabaseAuth(page) {
-  await page.route('**/auth/v1/**', async (route) => {
-    const url = route.request().url()
-    if (url.includes('/token')) {
-      const body = JSON.parse(route.request().postData() ?? '{}')
-      if (body.password !== 'correct-password') {
-        return route.fulfill({
-          status: 400,
-          contentType: 'application/json',
-          body: JSON.stringify({ code: 'invalid_credentials', error_code: 'invalid_credentials', msg: 'Invalid login credentials' }),
-        })
-      }
-      const email = body.email
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          access_token: fakeJwt(email),
-          token_type: 'bearer',
-          expires_in: 3600,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          refresh_token: 'refresh',
-          user: {
-            id: email === 'cr@e2e.test' ? '44444444-4444-4444-4444-444444444444' : '55555555-5555-5555-5555-555555555555',
-            email,
-            aud: 'authenticated',
-            role: 'authenticated',
-            app_metadata: {},
-            user_metadata: {},
-            created_at: new Date().toISOString(),
-          },
-        }),
-      })
-    }
-    if (url.includes('/logout')) return route.fulfill({ status: 204, body: '' })
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
-  })
-}
-
-async function signIn(page, email = 'cr@e2e.test', password = 'correct-password') {
-  await page.goto(`${APP}/cr/`)
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-}
+let currentPage = null // screenshotted when a step fails
 
 async function step(name, fn) {
   try {
@@ -84,6 +42,7 @@ async function step(name, fn) {
     console.log(`PASS  ${name}`)
   } catch (error) {
     results.push(['FAIL', name, error.message])
+    if (currentPage) await currentPage.screenshot({ path: `${SHOTS}/FAIL-${results.length}.png`, fullPage: true }).catch(() => {})
     console.log(`FAIL  ${name}\n      ${error.message.split('\n').slice(0, 6).join('\n      ')}`)
   }
 }
@@ -127,21 +86,33 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
 {
   const context = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
   const page = await context.newPage()
-  await fakeSupabaseAuth(page)
+  currentPage = page
   const apiCalls = []
   page.on('request', (req) => {
     if (req.url().includes(':8011/api/')) apiCalls.push(`${req.method()} ${new URL(req.url()).pathname}`)
   })
-
-  await step('wrong password shows an inline error', async () => {
-    await signIn(page, 'cr@e2e.test', 'nope')
-    await page.getByText('Wrong email or password.').waitFor({ timeout: 5000 })
+  page.on('response', async (res) => {
+    if (res.url().includes(':8011/api/') && res.status() >= 400 && process.env.E2E_VERBOSE) {
+      console.log(`      ${res.status()} ${res.request().method()} ${new URL(res.url()).pathname} ${await res.text().catch(() => '')}`)
+    }
   })
 
-  await step('CR signs in and lands on Exams', async () => {
-    await page.getByLabel('Password').fill('correct-password')
-    await page.getByRole('button', { name: 'Sign in' }).click()
+  await step('editor without a link explains how to get one', async () => {
+    await page.goto(`${APP}/cr/`)
+    await page.getByRole('heading', { name: 'Open the editor from Discord' }).waitFor({ timeout: 5000 })
+    await page.getByText('/manage').first().waitFor()
+  })
+
+  await step('a forged link is refused', async () => {
+    await page.goto(`${APP}/cr/#t=e1.1.1.9999999999.forged`)
+    await page.getByRole('heading', { name: 'This link has expired' }).waitFor({ timeout: 5000 })
+  })
+
+  await step('CR opens the /manage link and lands on the class, token removed from the URL', async () => {
+    await openEditor(page)
     await page.getByRole('heading', { name: 'Exams', level: 1 }).waitFor({ timeout: 5000 })
+    await page.locator('.brand-name', { hasText: 'E2E Class A' }).waitFor()
+    assert.ok(!page.url().includes('t='), `token still in URL: ${page.url()}`)
     await page.screenshot({ path: `${SHOTS}/01-exams-360.png`, fullPage: true })
   })
 
@@ -273,8 +244,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
     const posts = apiCalls.filter((c) => c === 'POST /api/exams').length - before
     assert.ok(posts <= 1, `expected at most one POST, saw ${posts}`)
     const count = await page.evaluate(async (p) => {
-      const key = Object.keys(localStorage).find((k) => k.includes('auth-token'))
-      const token = JSON.parse(localStorage.getItem(key)).access_token
+      const token = sessionStorage.getItem('aicr-editor-token')
       const r = await fetch('http://127.0.0.1:8011/api/exams?scope=upcoming&limit=100', { headers: { Authorization: `Bearer ${token}` } })
       return (await r.json()).exams.filter((e) => e.course_code === `${p}-416`).length
     }, prefix)
@@ -293,13 +263,33 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
     await page.locator('.exam-card', { hasText: `${prefix}-416` }).getByText(/2:30/).waitFor()
   })
 
+  await step('post next week and a single exam to Discord, after confirming', async () => {
+    const before = (await (await fetch('http://127.0.0.1:8011/e2e/posts')).json()).length
+    await page.getByRole('button', { name: '📣 This week' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.getByRole('button', { name: '📣 Next exam day' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Post' }).click()
+    await page.getByText('Posted to Discord').waitFor()
+    await page.locator('.exam-card', { hasText: `${prefix}-416` }).getByRole('button', { name: '📣 Post' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Post' }).click()
+    await page.getByText(`Posted ${prefix}-416 Lab Test to Discord.`).waitFor()
+    const posts = (await (await fetch('http://127.0.0.1:8011/e2e/posts')).json()).slice(before)
+    assert.equal(posts.length, 2, 'cancel posts nothing')
+    assert.ok(posts.every((p) => p.channel === LINKS.mine.channel))
+    assert.match(posts[1].messages[0], new RegExp(`${prefix}-416`))
+    assert.match(posts[1].messages[0], /Experiment 1/)
+    await page.screenshot({ path: `${SHOTS}/05b-posted-360.png`, fullPage: true })
+  })
+
   await step('student board shows the exam read-only, without signing in', async () => {
     const studentContext = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true })
     const student = await studentContext.newPage()
     const requests = []
     student.on('request', (request) => requests.push(new URL(request.url()).pathname))
-    await student.goto(APP)
+    await student.goto(LINKS.mine.board)
     await student.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor({ timeout: 5000 })
+    await student.locator('.brand-name', { hasText: 'E2E Class A' }).waitFor()
     const card = student.locator('.exam-card', { hasText: `${prefix}-416` })
     await card.waitFor()
     await card.getByText('Experiment 1').waitFor()
@@ -307,8 +297,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
     assert.equal(await student.getByRole('button', { name: /Edit|Delete|New exam|Sign out/ }).count(), 0)
     assert.equal(await student.locator('input, textarea').count(), 0)
     assert.equal(await student.getByLabel('Email').count(), 0)
-    const href = await student.getByRole('link', { name: /Ask on Messenger/ }).first().getAttribute('href')
-    assert.match(href, /^https:\/\/m\.me\//)
+    assert.equal(await student.getByText(/Messenger/).count(), 0)
 
     await student.getByLabel('Course').selectOption(await student.locator('option', { hasText: `${prefix}-415` }).getAttribute('value'))
     await student.getByText('No upcoming exams posted').waitFor()
@@ -395,13 +384,20 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
   await context.close()
 }
 
-// ---------------------------------------------------------------- non-CR account
-await step('signed-in non-CR account is refused', async () => {
+// ---------------------------------------------------------------- one class never sees another
+await step("another class's editor and board don't show this class's data", async () => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const page = await context.newPage()
-  await fakeSupabaseAuth(page)
-  await signIn(page, 'student@e2e.test')
-  await page.getByRole('heading', { name: 'Not a CR account' }).waitFor({ timeout: 5000 })
+  await openEditor(page, LINKS.other.editor)
+  await page.locator('.brand-name', { hasText: 'E2E Class B' }).waitFor({ timeout: 5000 })
+  await nav(page, 'Courses').click()
+  await page.getByRole('heading', { name: 'Courses', level: 1 }).waitFor()
+  assert.equal(await page.getByText(`${prefix}-415`).count(), 0)
+  await page.goto(LINKS.other.board)
+  await page.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor({ timeout: 5000 })
+  assert.equal(await page.locator('.exam-card', { hasText: prefix }).count(), 0)
+  await page.goto(`${APP}/c/00000000-0000-4000-8000-000000000000`)
+  await page.getByText('This class link is not valid').waitFor({ timeout: 5000 })
   await context.close()
 })
 
@@ -409,8 +405,7 @@ await step('signed-in non-CR account is refused', async () => {
 for (const vp of VIEWPORTS) {
   const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.isMobile, hasTouch: vp.isMobile })
   const page = await context.newPage()
-  await fakeSupabaseAuth(page)
-  await signIn(page)
+  await openEditor(page)
   await page.getByRole('heading', { name: 'Exams', level: 1 }).waitFor({ timeout: 5000 })
 
   for (const tab of ['Exams', 'Courses', 'Faculty']) {
@@ -438,7 +433,7 @@ for (const vp of VIEWPORTS) {
   await step(`${vp.name} ${vp.width}px student board: no horizontal overflow${vp.isMobile ? ', touch targets >= 44px' : ''}`, async () => {
     const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.isMobile, hasTouch: vp.isMobile })
     const page = await context.newPage()
-    await page.goto(APP)
+    await page.goto(LINKS.mine.board)
     await page.getByRole('heading', { name: 'Upcoming exams', level: 1 }).waitFor({ timeout: 5000 })
     await page.getByRole('tab', { name: 'Past' }).click()
     await page.getByRole('heading', { name: 'Past exams', level: 1 }).waitFor()

@@ -666,3 +666,16 @@ legend { margin-bottom: 8px; }
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+
+/* CR editor: header actions and the Post to Discord panel */
+.discord-panel { display: flex; flex-direction: column; gap: 12px; }
+.discord-title { font-weight: 700; color: var(--text-h); }
+.discord-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.discord-head a { min-height: 44px; display: inline-flex; align-items: center; font-weight: 600; }
+.discord-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.discord-buttons .btn { width: 100%; }
+.discord-auto { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.discord-auto input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--accent); }
+@media (min-width: 720px) {
+  .discord-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

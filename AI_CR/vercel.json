@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [{ "source": "/cr/:path*", "destination": "/cr/index.html" }]
+  "rewrites": [
+    { "source": "/cr/:path*", "destination": "/cr/index.html" },
+    { "source": "/c/:key", "destination": "/index.html" }
+  ],
+  "headers": [
+    { "source": "/cr/(.*)", "headers": [{ "key": "Referrer-Policy", "value": "no-referrer" }] }
+  ]
 }

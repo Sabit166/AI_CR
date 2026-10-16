@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js'
+import { editorToken } from './session.js'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001').replace(/\/$/, '')
 
@@ -28,9 +28,8 @@ function errorFromResponse(status, body) {
 }
 
 export async function api(path, { method = 'GET', body, signal } = {}) {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
-  if (!token) throw new ApiError('Please sign in.', { status: 401 })
+  const token = editorToken()
+  if (!token) throw new ApiError('Run /manage in your class channel on Discord to open the editor.', { status: 401 })
 
   let response
   try {

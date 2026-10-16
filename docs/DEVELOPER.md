@@ -2,67 +2,138 @@
 
 Technical documentation (architecture, setup, tests, deployment). The student and CR guide is in [README.md](../README.md).
 
-Class-representative assistant: a CR dashboard for configuring courses and posting exam
-information, and a Facebook Messenger bot that answers students' exam questions from the
-same Supabase data.
+Class-representative assistant for many classes: a **Discord bot** where each channel is one class, a read-only
+exam list per class, and a CR editor per class. Everything reads the same Supabase data.
 
 ## Deployment
 
-- FastAPI backend + Messenger webhook (Render): https://ai-cr.onrender.com/
+- FastAPI backend + Discord interactions endpoint + scheduler (Render): https://ai-cr.onrender.com/
 - Web app (Vercel production domain): https://ai-cr-three.vercel.app/
-  - `/` — public, read-only student exam board (no sign-in; calls only `GET /api/public/*`)
-  - `/cr/` — CR dashboard (Supabase sign-in + `cr_members`)
+  - `/c/<view_key>` — a class's read-only exam list (no sign-in; calls only `GET /api/public/classes/<view_key>/*`)
+  - `/cr/#t=<token>` — CR editor for one class, opened from the private link `/manage` sends
 
 ## Architecture
 
 ```
-Student board (AI_CR/, /) ──no auth, read-only──► FastAPI /api/public/* (public_api.py, 30s cache)
-CR dashboard (AI_CR/, /cr/) ──Supabase Auth token──► FastAPI /api/* (cr_api.py)
-                                                         │  checks token + cr_members allowlist
-                                                         ▼
-Messenger ──► POST /webhook (main.py) ──► Chatbot.answer ──► Supabase (PostgREST, secret key)
-                                            1 LLM call         courses · faculty · exams
-                                            (intent only)      exam_details view · RPCs
+Discord ──slash command──► POST /discord/interactions (discord_bot/interactions.py)
+          (Ed25519-signed)    │ verify signature → reply "thinking…" (ephemeral) within 3 s
+                              │ background task: channel → class → updates.py / Chatbot.answer
+                              └─► PATCH interaction webhook (the answer; no bot token needed)
+
+Scheduler (scheduler.py, every 60 s in the web process; or POST /cron/tick)
+   Friday 18:00 next-week update · 20:00 day-before reminder
+   claim in class_notifications ──► POST /channels/<id>/messages (bot token)
+
+Exam list (/c/<key>) ──no auth, read-only──► /api/public/classes/<key>/* (public_api.py, 30 s cache)
+CR editor (/cr/)    ──Bearer editor token──► /api/* (cr_api.py): every route scoped to the token's class
+                                             /api/discord/post* → the class channel
+
+                    all of the above ──► Supabase (PostgREST, secret key): classes · courses · faculty ·
+                                         exams · exam_details view · class-scoped RPCs
 ```
+
+The bot uses only Discord's HTTP APIs — no gateway connection, so it runs inside the existing FastAPI service.
+
+### Classes, links and who is a CR
+
+- **One class = one Discord channel** (`classes.discord_channel_id`, unique). A command in a thread counts as its
+  parent channel. Courses and faculty carry `class_id`; exams belong to a class through their course.
+- **CR** = a member with Administrator, Manage Server or Manage Channels in that channel (Discord sends the computed
+  `member.permissions` with every interaction), or with the class's `cr_role_id`. `/setup` needs Manage Channels.
+- **Board link** `SITE_URL/c/<view_key>` — `view_key` is a random uuid per class; anyone with it can read that class.
+- **Editor link** `SITE_URL/cr/#t=<token>` (`links.py`). `/manage` checks the member is a CR and sends the link
+  ephemerally. The token is `e1.<class_id>.<discord_user_id>.<expiry>.<HMAC-SHA256>` signed with
+  `EDITOR_LINK_SECRET`, valid `EDITOR_LINK_HOURS` (default 12). Nothing is stored; rotating the secret revokes all
+  links. It is carried in the URL fragment (never sent to servers or in Referer), moved to `sessionStorage` and
+  removed from the address bar on load (`AI_CR/src/lib/session.js`).
+- `auth.require_cr` validates the token and loads the class; every `cr_api` route uses `user.class_id`. A course or
+  exam of another class is reported as not found. The write RPCs take `p_class_id` and check it again.
 
 ### Data model (`supabase/migrations/`)
 
 | Object | Purpose |
 |---|---|
-| `courses` | Code, title, aliases. `course_type` is a generated column from the code (odd = Theoretical, even = Sessional). Active = `archived_at is null`; one active row per code. |
-| `faculty`, `course_faculty` | One faculty directory, many-to-many with courses. `course_faculty.sections` lists the course sections (A, B) a teacher takes on a Theoretical course; empty for Sessional. |
-| `exam_types` | The single list of allowed exam types per course type (CT 1, CT 2, Mid, CT 3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). |
-| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; `section` = class section, Sessional only (NULL = whole class); `course_section` = A/B, Theoretical only (NULL = both course sections). The `exams_theory_whole_class` trigger keeps each column NULL for the other course type. Syllabus, venue, remarks, notes link. `exam_faculty` is used for Sessional exams only. |
-| `exam_details` (view) | Read model used by the bot and dashboard. For Theoretical exams `faculty_*` are the teachers of the exam's course section(s), and `section_faculty` is `[{"section", "name"}]`. |
-| `cr_save_course`, `cr_save_exam`, `cr_remove_course`, `cr_remove_faculty` | Transactional write RPCs; validation is repeated in triggers. |
-| `cr_members` | Supabase Auth users allowed to use the dashboard. |
+| `classes` | One per Discord channel: name, guild/channel/CR-role ids (text: snowflakes exceed JS integers), `view_key`, `auto_updates`. |
+| `class_notifications` | Automatic posts already claimed per class (`weekly:<sunday>`, `eve:<exam day>`), status `sending`/`sent`/`failed`. |
+| `courses` | `class_id`, code, title, aliases. `course_type` is a generated column from the code (odd = Theoretical, even = Sessional). Active = `archived_at is null`; one active row per code **per class**. |
+| `faculty`, `course_faculty` | A faculty directory per class (names unique per class), many-to-many with courses; a trigger refuses linking a teacher of another class. `course_faculty.sections` lists the course sections (A, B) a teacher takes on a Theoretical course; empty for Sessional. |
+| `exam_types` | The single list of allowed exam types per course type (CT 1, CT 2, Mid, CT 3; Project Update, Evaluation, Online Exam, Project Presentation, Lab Test). Shared by all classes. |
+| `exams`, `exam_faculty` | One row per assessment: `exam_date` (date) + optional `exam_time`, Asia/Dhaka local; `section` = class section, Sessional only (NULL = whole class); `course_section` = A/B, Theoretical only (NULL = both course sections). The `exams_theory_whole_class` trigger keeps each column NULL for the other course type. Syllabus, venue, remarks, notes link. `created_by_discord`/`updated_by_discord` = Discord user id of the CR. `exam_faculty` is used for Sessional exams only. |
+| `exam_details` (view) | Read model used by the bot, updates and editor; includes `class_id`. For Theoretical exams `faculty_*` are the teachers of the exam's course section(s), and `section_faculty` is `[{"section", "name"}]`. |
+| `cr_save_course`, `cr_save_exam`, `cr_remove_course`, `cr_remove_faculty` | Transactional write RPCs, all taking `p_class_id` first; validation is repeated in triggers. |
+| `cr_members` | Unused since the Discord switch (kept for rollback). |
 
 The original flat `"Exams"` table is left untouched; its rows were copied into the new tables.
 
 ### Business rules
 
 - **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`), with shared test vectors.
-- **Course sections (Theoretical)**: every Theoretical course has course sections A and B with one course teacher each; the same teacher may take both (so 1 or 2 distinct teachers). Sessional courses have no course sections and any number of teachers. `faculty_exception_note` is no longer used.
+- **Course sections (Theoretical)**: every Theoretical course has course sections A and B with one course teacher each; the same teacher may take both (so 1 or 2 distinct teachers). Sessional courses have no course sections and any number of teachers.
 - **Theoretical exams** are posted for course section A, B or both. The teacher is derived from the section (exam-level picks are ignored). Both sections sit an exam together, so `cr_save_exam` moves the other section's record of the same exam type to the saved date/time. Only one record per course section per exam type (whatever the date).
 - **Class sections**: only Sessional exams have one, and Sessional exams of different class sections may be at different times. The bot's `section` filter matches the class section or the course section (NULL rows always match).
-- **Date/time input**: the dashboard uses dropdowns (`AI_CR/src/lib/pickers.js`) — dates from 14 days back to 180 days ahead, times 7 AM–11 PM in 5-minute steps; an existing value outside those lists is still offered.
-- The odd/even rule is not shown in the dashboard or student pages; CRs only see the resulting type.
+- **Date/time input**: the editor uses dropdowns (`AI_CR/src/lib/pickers.js`) — dates from 14 days back to 180 days ahead, times 7 AM–11 PM in 5-minute steps; an existing value outside those lists is still offered.
 - **Exam types** must match the course type — enforced by the API and by a database trigger.
 - **Removing a course** that has exams archives it (history kept); a course without exams is deleted.
 - **Duplicate saves**: the exam form sends a `client_request_id`; retries return the same row. A second Sessional exam with the same course, type, date and class section is rejected; for Theoretical, see above.
 
-### Student agent (`Chatbot/`)
+### Discord updates (`updates.py`)
 
-1. Load the course catalog from Supabase (cached ≤ `CATALOG_TTL_SECONDS`, default 60 s; cleared instantly after any CR write).
+Shared by the slash commands, the editor's Post buttons and the scheduler. Deterministic text from `exam_details`
+rows; CR-typed text is escaped so it can't become Discord markdown, every message is sent with
+`allowed_mentions: {parse: []}` (no `@everyone`/role pings), notes links are wrapped in `<…>` (no previews), and
+messages are split under 2000 characters on record boundaries.
+
+- `/this-week`: today → Thursday; Friday/Saturday says the week is over and shows next week.
+- `/next-week`: next Sunday → Thursday.
+- `/next-exam-day`: the earliest day with an exam that hasn't started (today's exams count until their start time), and **all** exams on it.
+- `/next-exam-notes`: the same day, notes links only.
+- Day-before reminder: all exams on tomorrow's date; skipped (and not claimed) when there are none.
+
+### Scheduler (`scheduler.py`)
+
+`run_tick()` runs every `TICK_SECONDS` (60) in the web process (`main.py` lifespan) when `DISCORD_BOT_TOKEN` is set
+and `SCHEDULER_ENABLED` isn't `0`. For each class with a channel and `auto_updates`:
+
+- weekly: due on Friday from `WEEKLY_UPDATE_TIME` (18:00) and all of Saturday (catch-up), key `weekly:<next Sunday>`;
+- reminder: due from `EXAM_REMINDER_TIME` (20:00) until midnight, key `eve:<tomorrow>`, only if tomorrow has exams.
+
+Each post is claimed with an `insert … on conflict do nothing` before sending, so it goes out once per class even
+across restarts or several instances. Temporary Discord errors release the claim (retried next tick); permanent
+ones (no channel access) are marked `failed`. On Render's free plan the service must be awake at those times — keep
+the external pinger, or point an external cron at `POST /cron/tick` with header `X-Cron-Secret: $CRON_SECRET`.
+
+### Student agent (`Chatbot/`, used by `/ask`)
+
+1. Load the class's course catalog from Supabase (cached per class ≤ `CATALOG_TTL_SECONDS`, default 60 s; cleared instantly after any CR write to that class).
 2. **One** structured-output LLM call extracts intent: verbatim course/teacher mentions, exam types, kind of time range, requested fields. The prompt contains no course, teacher or date data.
 3. Unambiguous time phrases ("next week", "this week", "tomorrow", explicit dates, "Sunday to Thursday") are detected by rules and override the LLM.
-4. Mentions are resolved deterministically: code → exact title/alias → acronym → department prefix → word match → fuzzy. Several plausible courses → the bot asks which one (an exam type can settle it: "Database CT" can only be the theory course).
-5. Dates are computed in Python for Asia/Dhaka, then **one** filtered, sorted `exam_details` query runs.
-6. The reply is formatted from the rows (nothing generated), split at record boundaries under Messenger's 2000-character limit.
+4. Mentions are resolved deterministically against the class's catalog: code → exact title/alias → acronym → department prefix → word match → fuzzy. Several plausible courses → the bot asks which one.
+5. Dates are computed in Python for Asia/Dhaka, then **one** filtered, sorted `exam_details` query runs, always filtered by `class_id`.
+6. The reply is formatted from the rows (nothing generated), split at record boundaries under Discord's 2000-character limit.
 
 If the LLM is unavailable a rule-based parser takes over. Database failures are reported as such, never as "no exams".
 
-**Weeks**: the academic week is Sunday–Thursday. "This week" = today → Thursday (on Friday/Saturday the bot says the week is over and shows next week). "Next week" = the following Sunday–Thursday. Today is always taken in Asia/Dhaka.
+**Weeks**: the academic week is Sunday–Thursday. Today is always taken in Asia/Dhaka.
+
+## Setting up the Discord bot
+
+1. **Create the application**: https://discord.com/developers/applications → **New Application**.
+2. **General Information**: copy the **Application ID** → `DISCORD_APPLICATION_ID` and the **Public Key** →
+   `DISCORD_PUBLIC_KEY`.
+3. **Bot**: **Reset Token**, copy it → `DISCORD_BOT_TOKEN` (secret). No privileged gateway intents are needed
+   (leave Message Content, Server Members and Presence off).
+4. **Installation**: Installation Contexts → **Guild Install** only. Default install settings for Guild Install:
+   scopes `applications.commands` and `bot`; permissions **View Channels**, **Send Messages**,
+   **Send Messages in Threads**, **Embed Links**. Use the install link shown there to add the bot to your server.
+5. **Deploy the backend** with the env vars below, then in **General Information** set
+   **Interactions Endpoint URL** to `https://ai-cr.onrender.com/discord/interactions` and save. Discord sends a
+   signed PING and an unsigned test request; saving succeeds only if both are answered correctly.
+6. **Register the slash commands** (again whenever `discord_bot/commands.py` changes):
+   ```bash
+   env/Scripts/python scripts/register_discord_commands.py               # all servers (may take a few minutes)
+   env/Scripts/python scripts/register_discord_commands.py --guild <id>  # one server, instantly (testing)
+   ```
+7. In each class's channel: `/setup name:<class name>` (optionally `cr_role:`), then a CR runs `/manage`.
 
 ## Local development
 
@@ -72,14 +143,18 @@ python -m venv env && env/Scripts/pip install -r requirements-dev.txt   # env/bi
 cp .env.example .env            # fill in values
 env/Scripts/uvicorn main:app --host 127.0.0.1 --port 8001
 
-# Ask the bot from the terminal
-env/Scripts/python -m Chatbot.Chatbot "what exams do we have next week?"
+# Ask the bot from the terminal (class id from public.classes)
+env/Scripts/python -m Chatbot.Chatbot --class-id 1 "what exams do we have next week?"
 
-# Dashboard
+# Web app
 cd AI_CR && npm install
 cp .env.example .env.local      # fill in values
 npm run dev
 ```
+
+To try slash commands against a local backend, expose it with a tunnel (e.g. `cloudflared tunnel --url
+http://127.0.0.1:8001`), set the tunnel URL + `/discord/interactions` as the Interactions Endpoint URL of a
+separate test application, and register commands with `--guild`.
 
 ## Tests
 
@@ -98,98 +173,87 @@ cd AI_CR && npm run lint && npm test && npm run build
 # Mobile UI end-to-end (needs the Docker stack above and Google Chrome)
 env/Scripts/python tests/e2e/server.py                 # repo root, port 8011
 cd AI_CR && npm run e2e:build && npm run e2e:preview    # port 4179
-cd AI_CR && npm run e2e
+cd AI_CR && npm run e2e                                 # E2E_VERBOSE=1 logs failed API calls
 ```
 
-Tests never touch Supabase: `tests/conftest.py` pins harmless connection settings.
+Tests never touch Supabase or Discord: `tests/conftest.py` pins harmless settings, and the e2e server
+(`tests/e2e/server.py`) creates two classes, serves their links on `GET /e2e/links` and captures Discord posts.
 
 ## Applying the database migration
 
-**Status:** both migrations were applied to the live project on 2026-10-13 (versions match the
-file names in `supabase/migrations/`). All 6 legacy rows were copied. The steps below are for
-a fresh project or for reference; step 5 (CR account) still has to be done once.
+**Status:** migrations up to `20261014074933_theory_course_sections.sql` are applied on the live project.
+**`20261016120000_discord_classes.sql` is not applied yet.** It must go in together with the new backend: the new
+code needs `classes`, and the old code breaks on the new RPC signatures.
 
-`20261013150000_course_rules_update.sql` (Theoretical = exactly 2 teachers, Sessional any number, no sections on
-Theoretical exams, Mid enabled) was applied on 2026-10-14; rollback in
-`supabase/rollback/20261013150000_course_rules_update_down.sql`. The same day all old exam and course data
-(including the legacy `"Exams"` rows) was deleted at the CRs' request, so production started empty for the new term.
-
-`20261014074933_theory_course_sections.sql` (applied 2026-10-14) adds course sections (see Business rules); rollback in
-`supabase/rollback/20261014074933_theory_course_sections_down.sql`. It keeps existing Theoretical courses'
-teachers but assigns no sections — the CR picks the Section A and B teachers under **Courses** (the course card
-shows a reminder until they are set) before posting Theoretical exams. The new `cr_save_course` /
-`cr_save_exam` signatures replace the old ones, so deploy the backend right after applying it.
-
-`supabase/migrations/20261013031917_dynamic_course_config.sql` is the real change;
-`20261013031653_legacy_exams_baseline.sql` only documents the existing table (a no-op on the live database).
-
-1. Back up: Supabase dashboard → Database → Backups, or export the `Exams` table as CSV.
+1. Back up: Supabase dashboard → Database → Backups (or export `courses`, `faculty`, `exams` as CSV).
 2. Run the migration in the SQL editor, or with the CLI: `supabase db push`.
-3. Read the NOTICE output: any legacy rows that could not be copied are listed by id and stay in `"Exams"`.
-4. Check: `select * from exam_details order by exam_date;`
-5. Create the CR account: Authentication → Users → **Add user** (email + password). Then:
-   ```sql
-   insert into public.cr_members (user_id, note)
-   select id, 'Class representative' from auth.users where email = 'cr@example.com';
-   ```
-6. Recommended: Authentication → Providers → Email → turn off **Allow new users to sign up**. (Even if someone signs up, they are not in `cr_members` and get 403.)
+3. Check: `select id, name, discord_channel_id from classes;` — if courses or faculty existed, they are in one
+   class named "My class" with no channel.
+4. Deploy the backend (Render) and the web app (Vercel).
+5. In the Discord channel that should own the existing data:
+   `/setup name:<class name> use_existing_data:True`. Other channels: plain `/setup`.
 
-The legacy teacher names are kept per exam (`legacy_teacher`) but not turned into faculty records, because variants such as "Major Nazmul" / "Maj Nazmul Hasan" can't be merged safely. Add faculty and assign them to courses in the dashboard.
+Rollback: `supabase/rollback/20261016120000_discord_classes_down.sql` (it refuses to run if two classes share a
+course code or teacher name; export first), then redeploy the previous backend and web app.
 
-### Rollback
-
-- **Application**: redeploy the previous commit on Render/Vercel. The old code only uses the untouched `"Exams"` table.
-- **Database**: `supabase/rollback/20261013031917_dynamic_course_config_down.sql` drops the new objects. Exams created after the migration exist only in `public.exams`; export them first.
+Older rollbacks: `supabase/rollback/20261014074933_theory_course_sections_down.sql`,
+`20261013150000_course_rules_update_down.sql`, `20261013031917_dynamic_course_config_down.sql`.
+`20261013031653_legacy_exams_baseline.sql` only documents the original `"Exams"` table (a no-op on the live database).
 
 ## Deploying
 
-**Order**: migration → backend (Render) → dashboard (Vercel).
+**Order**: migration → backend (Render) → web app (Vercel) → Discord Interactions Endpoint URL → register commands.
 
-Render (`main.py`; build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`) — unchanged commands. Environment:
+Render (`main.py`; build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`).
+Run a **single instance** for the in-process scheduler to be cheap (several are safe, just redundant). Environment:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `SUPABASE_URL` | yes | `https://<ref>.supabase.co/rest/v1` (as before) |
+| `SUPABASE_URL` | yes | `https://<ref>.supabase.co/rest/v1` |
 | `SUPABASE_API_KEY` | yes | Supabase **secret** key. Server only. |
-| `OPENAI_API_KEY`, `MODEL` | yes | As before. Without them the rule-based parser is used. |
-| `PAGE_ACCESS_TOKEN` | yes | As before. |
-| `MESSENGER_APP_SECRET` | recommended | Facebook App Secret. When set, webhook calls must carry a valid `X-Hub-Signature-256`. |
-| `MESSENGER_VERIFY_TOKEN` | optional | Defaults to the previous hard-coded token. |
-| `CORS_ALLOW_ORIGINS` | recommended | Comma-separated dashboard origins. Unset = `*` (auth uses bearer tokens, not cookies). |
+| `DISCORD_APPLICATION_ID` | yes | Developer Portal → General Information. |
+| `DISCORD_PUBLIC_KEY` | yes | Developer Portal → General Information. Used to verify every interaction. |
+| `DISCORD_BOT_TOKEN` | yes | Developer Portal → Bot. Secret. Needed for channel posts; the scheduler is off without it. |
+| `EDITOR_LINK_SECRET` | yes | ≥ 32 random characters (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Changing it revokes all editor links. |
+| `SITE_URL` | yes | The web app's URL, e.g. `https://ai-cr-three.vercel.app` (used in the links the bot sends). |
+| `EDITOR_LINK_HOURS` | optional | Default 12. |
+| `WEEKLY_UPDATE_TIME`, `EXAM_REMINDER_TIME` | optional | `HH:MM` Asia/Dhaka; defaults 18:00 and 20:00. |
+| `SCHEDULER_ENABLED` | optional | `0` turns the in-process scheduler off (e.g. when only an external cron should run it). |
+| `CRON_SECRET` | optional | Enables `POST /cron/tick` (header `X-Cron-Secret`). |
+| `OPENAI_API_KEY`, `MODEL` | optional | For `/ask`. Without them the rule-based parser is used. |
+| `CORS_ALLOW_ORIGINS` | recommended | Comma-separated web app origins. Unset = `*` (the editor uses bearer tokens, not cookies). |
 | `CORS_ALLOW_ORIGIN_REGEX` | optional | e.g. `https://ai-.*-sabit166s-projects\.vercel\.app` for Vercel previews. |
-| `CATALOG_TTL_SECONDS` | optional | Default 60. |
+| `CATALOG_TTL_SECONDS`, `PUBLIC_CACHE_SECONDS` | optional | Defaults 60 and 30. |
+
+The old `PAGE_ACCESS_TOKEN`, `MESSENGER_APP_SECRET` and `MESSENGER_VERIFY_TOKEN` are no longer read; remove them.
 
 Vercel (`AI_CR/`):
 
 | Variable | Notes |
 |---|---|
 | `VITE_API_BASE_URL` | `https://ai-cr.onrender.com` |
-| `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Publishable (anon) key — safe in the browser; it grants no table access. Never put the secret key here. |
-| `VITE_MESSENGER_URL` | Optional. Messenger link on the student board (default `https://m.me/61592083183113`). |
 
-### Student board (`GET /api/public/*`)
+`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_MESSENGER_URL` are no longer used; remove them.
+`AI_CR/vercel.json` rewrites `/c/<key>` to the exam list page and `/cr/*` to the editor, and sends
+`Referrer-Policy: no-referrer` on the editor.
 
-`/api/public/exams?scope=upcoming|past&course_id=&limit=&offset=` and `/api/public/courses`. No sign-in, GET only.
-They return only student-facing fields (`public_api.PUBLIC_EXAM_FIELDS`: no ids of who saved what, no legacy ids,
-no timestamps), the same information the Messenger bot already gives anyone. Responses are cached in-process for
-`PUBLIC_CACHE_SECONDS` (default 30) and the cache is cleared on every CR write, so edits show up immediately.
+### Exam list (`GET /api/public/classes/<view_key>/*`)
 
-The web app is two Vite pages (`index.html` → `src/student/`, `cr/index.html` → `src/main.jsx`); the student
-bundle does not include Supabase. `AI_CR/vercel.json` rewrites `/cr/*` to the dashboard page.
+`/api/public/classes/<key>` (class name), `/exams?scope=upcoming|past&course_id=&limit=&offset=` and `/courses`.
+No sign-in, GET only, one class per key; unknown keys are 404. They return only student-facing fields
+(`public_api.PUBLIC_EXAM_FIELDS`), the same information the bot gives anyone in the channel. Responses are cached
+in-process for `PUBLIC_CACHE_SECONDS` and the cache is cleared on every CR write.
 
-### Messenger ice breakers
+### Discord Activity (in-Discord mini app) — not done
 
-The four ready-made questions a student sees in a new chat (Next exam date / syllabus / notes, Next week's update)
-live in `messenger_profile.py`. Tapping one sends a postback; `main.py` maps its payload to a fixed question and
-answers it like a typed message. To publish them (and after any change):
-
-1. Meta app dashboard → Messenger → Webhooks → make sure the Page is subscribed to **`messaging_postbacks`**
-   (in addition to `messages`).
-2. `python scripts/setup_messenger.py` (uses `PAGE_ACCESS_TOKEN` from `.env`); `--show` prints the current ones.
-
-Ice breakers appear only in a chat that has no messages yet (try from another account, or delete the conversation).
+The exam list and editor open in the browser from Discord link buttons. Running them as a Discord **Activity**
+(embedded app) is possible later: it needs the Embedded App SDK, an OAuth2 code exchange endpoint, URL mappings for
+the API through Discord's proxy, and the `guilds.members.read` scope to check roles. The current link-based flow
+already needs no login, so this would mainly change where the page opens.
 
 ### Removed
 
-The unauthenticated `GET/POST/PATCH/DELETE /exams` endpoints are gone (anyone could edit or delete exams). The dashboard now uses the authenticated `/api/*` routes.
+- Facebook Messenger: the `/webhook` endpoints, `messenger_profile.py`, `scripts/setup_messenger.py` and the
+  Meta App Review data-deletion page.
+- Supabase Auth sign-in for CRs (`LoginScreen`, `@supabase/supabase-js`, `cr_members` checks).
+- The single-class public endpoints `GET /api/public/exams` and `/api/public/courses`.

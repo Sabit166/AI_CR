@@ -1,7 +1,7 @@
 """Runtime course configuration for the student agent.
 
-The catalog (active courses, their faculty, exam types) is loaded from Supabase
-and cached briefly. Freshness rules:
+The catalog (a class's active courses, their faculty, exam types) is loaded from
+Supabase and cached briefly, per class. Freshness rules:
   * CR writes in this process call `invalidate()`, so the next student question
     reloads immediately.
   * Otherwise entries expire after CATALOG_TTL_SECONDS (default 60s), which
@@ -120,36 +120,43 @@ def build_catalog(course_rows: list[dict], exam_type_rows: list[dict]) -> Catalo
     return Catalog(courses, exam_types)
 
 
-def load_catalog_from_db() -> Catalog:
-    return build_catalog(db_fetch.fetch_active_courses(), db_fetch.fetch_exam_types())
+def load_catalog_from_db(class_id: int) -> Catalog:
+    return build_catalog(db_fetch.fetch_active_courses(class_id), db_fetch.fetch_exam_types())
 
 
 class CatalogCache:
-    def __init__(self, loader: Callable[[], Catalog] = load_catalog_from_db, ttl: float = CATALOG_TTL_SECONDS):
+    """One cached catalog per class (Discord channel)."""
+
+    def __init__(self, loader: Callable[[int], Catalog] = load_catalog_from_db, ttl: float = CATALOG_TTL_SECONDS):
         self._loader = loader
         self._ttl = ttl
         self._lock = threading.Lock()
-        self._catalog: Catalog | None = None
+        self._catalogs: dict[int, Catalog] = {}
         self._generation = 0
 
-    def get(self) -> Catalog:
+    def get(self, class_id: int) -> Catalog:
         with self._lock:
-            catalog = self._catalog
+            catalog = self._catalogs.get(class_id)
             if catalog is not None and time.monotonic() - catalog.loaded_at < self._ttl:
                 return catalog
             generation = self._generation
 
-        fresh = self._loader()  # raises on failure: never fall back to a stale copy
+        fresh = self._loader(class_id)  # raises on failure: never fall back to a stale copy
 
         with self._lock:
             # Don't overwrite if invalidate() ran while we were loading.
             if generation == self._generation:
-                self._catalog = fresh
+                if len(self._catalogs) >= 512:
+                    self._catalogs.clear()
+                self._catalogs[class_id] = fresh
         return fresh
 
-    def invalidate(self) -> None:
+    def invalidate(self, class_id: int | None = None) -> None:
         with self._lock:
-            self._catalog = None
+            if class_id is None:
+                self._catalogs.clear()
+            else:
+                self._catalogs.pop(class_id, None)
             self._generation += 1
 
 

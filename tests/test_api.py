@@ -1,41 +1,52 @@
-"""CR API: authorization and server-side validation (database layer stubbed).
+"""CR editor API: editor-link authorization, class scoping, server-side validation and
+posting to Discord (database layer and Discord stubbed).
 tests/integration/test_db.py runs the same writes against real Postgres."""
-import hashlib
-import hmac
-import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 import auth
+import cr_api
 import db_fetch
+import links
 import main
-from conftest import COURSES, EXAM_TYPES, exam_row
+from conftest import CLASS_ID, COURSES, EXAM_TYPES, exam_row
+from discord_bot import client as discord
 
-CR_TOKEN = 'cr-token'
-STUDENT_TOKEN = 'student-token'
-CR_ID = '11111111-1111-1111-1111-111111111111'
-STUDENT_ID = '22222222-2222-2222-2222-222222222222'
+CR_USER = '123456789012345678'
+OTHER_CLASS = 2
+CLASSES = {
+    CLASS_ID: {'id': CLASS_ID, 'name': 'CSE 22', 'discord_guild_id': '900000000000000001',
+               'discord_channel_id': '900000000000000002', 'cr_role_id': None,
+               'view_key': '6f1d1d4e-1111-4111-8111-111111111111', 'auto_updates': True, 'archived_at': None},
+    OTHER_CLASS: {'id': OTHER_CLASS, 'name': 'EEE 22', 'discord_guild_id': '900000000000000001',
+                  'discord_channel_id': '900000000000000003', 'cr_role_id': None,
+                  'view_key': '6f1d1d4e-2222-4222-8222-222222222222', 'auto_updates': True, 'archived_at': None},
+}
+CR_TOKEN = links.make_editor_token(CLASS_ID, CR_USER)
+OTHER_CLASS_TOKEN = links.make_editor_token(OTHER_CLASS, CR_USER)
 
 
 @pytest.fixture
 def client(monkeypatch):
     auth.clear_auth_cache()
-    users = {CR_TOKEN: {'id': CR_ID, 'email': 'cr@example.com'},
-             STUDENT_TOKEN: {'id': STUDENT_ID, 'email': 'student@example.com'}}
-    monkeypatch.setattr(db_fetch, 'fetch_auth_user', lambda token: users.get(token))
-    monkeypatch.setattr(db_fetch, 'is_cr_member', lambda user_id: user_id == CR_ID)
+    cr_api._recent_posts.clear()
+    monkeypatch.setattr(db_fetch, 'fetch_class', lambda cid: CLASSES.get(cid))
     monkeypatch.setattr(db_fetch, 'fetch_exam_types', lambda: EXAM_TYPES)
-    courses = {c['id']: {**c, 'archived_at': None, 'faculty_exception_note': None} for c in COURSES}
+    courses = {c['id']: {**c, 'class_id': CLASS_ID, 'archived_at': None, 'faculty_exception_note': None} for c in COURSES}
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: courses.get(cid))
     writes = []
     monkeypatch.setattr(db_fetch, 'save_course', lambda **kw: writes.append(('course', kw)) or 99)
     monkeypatch.setattr(db_fetch, 'save_exam', lambda **kw: writes.append(('exam', kw)) or 500)
     monkeypatch.setattr(db_fetch, 'delete_exam', lambda exam_id: writes.append(('delete', exam_id)) or True)
-    monkeypatch.setattr(db_fetch, 'remove_course', lambda cid: writes.append(('remove_course', cid)) or 'archived')
+    monkeypatch.setattr(db_fetch, 'remove_course', lambda class_id, cid: writes.append(('remove_course', class_id, cid)) or 'archived')
     monkeypatch.setattr(db_fetch, 'get_exam', lambda eid: exam_row(eid, 1, 'CT 1', '2026-10-20') if eid in (500, 7) else None)
+    posted = []
+    monkeypatch.setattr(discord, 'post_messages', lambda channel, messages: posted.append((channel, messages)))
     test_client = TestClient(main.app)
     test_client.writes = writes
+    test_client.posted = posted
     return test_client
 
 
@@ -47,46 +58,97 @@ VALID_EXAM = {'course_id': 1, 'exam_type': 'CT 1', 'exam_date': '2026-10-20', 'e
               'syllabus': 'Ch 1\nCh 2', 'faculty_ids': [1]}
 
 
-# --- Authorization -------------------------------------------------------------
+# --- Editor links ---------------------------------------------------------------
 @pytest.mark.parametrize('method,path', [
     ('get', '/api/courses'), ('post', '/api/courses'), ('patch', '/api/courses/1'), ('delete', '/api/courses/1'),
     ('get', '/api/faculty'), ('post', '/api/faculty'), ('delete', '/api/faculty/1'),
     ('get', '/api/exams'), ('post', '/api/exams'), ('patch', '/api/exams/7'), ('delete', '/api/exams/7'),
-    ('get', '/api/config'),
+    ('get', '/api/config'), ('get', '/api/me'), ('patch', '/api/class'),
+    ('post', '/api/discord/post'), ('post', '/api/discord/post/exams/7'),
 ])
-def test_requires_sign_in(client, method, path):
+def test_requires_editor_link(client, method, path):
     assert getattr(client, method)(path).status_code == 401
     assert getattr(client, method)(path, headers=h('forged')).status_code == 401
+    assert client.writes == [] and client.posted == []
+
+
+def test_tampered_link_is_rejected(client):
+    *payload, signature = CR_TOKEN.split('.')
+    forged_class = '.'.join([payload[0], str(OTHER_CLASS), *payload[2:], signature])
+    assert client.get('/api/me', headers=h(forged_class)).status_code == 401
+    other_secret = CR_TOKEN[:-4] + ('AAAA' if not CR_TOKEN.endswith('AAAA') else 'BBBB')
+    assert client.get('/api/me', headers=h(other_secret)).status_code == 401
+
+
+def test_expired_link_is_rejected(client):
+    old = links.make_editor_token(CLASS_ID, CR_USER, now=time.time() - 30 * 3600)
+    r = client.get('/api/me', headers=h(old))
+    assert r.status_code == 401 and '/manage' in r.json()['detail']['message']
+
+
+def test_me_names_the_class(client):
+    body = client.get('/api/me', headers=h(CR_TOKEN)).json()
+    assert body['class']['name'] == 'CSE 22' and body['class']['linked'] is True
+    assert body['class']['board_url'] == 'https://board.example/c/6f1d1d4e-1111-4111-8111-111111111111'
+    assert body['user_id'] == CR_USER
+
+
+def test_removed_class_link_is_forbidden(client, monkeypatch):
+    monkeypatch.setattr(db_fetch, 'fetch_class', lambda cid: None)
+    assert client.get('/api/courses', headers=h(CR_TOKEN)).status_code == 403
+
+
+def test_link_check_outage_is_503_not_access(client, monkeypatch):
+    auth.clear_auth_cache()
+
+    def down(cid):
+        raise db_fetch.DatabaseError('down', code='unavailable')
+    monkeypatch.setattr(db_fetch, 'fetch_class', down)
+    assert client.get('/api/courses', headers=h(CR_TOKEN)).status_code == 503
+
+
+# --- A link only reaches its own class ------------------------------------------
+def test_lists_are_scoped_to_the_link_class(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(db_fetch, 'fetch_active_courses', lambda class_id, with_exam_counts=False: seen.append(class_id) or [])
+    monkeypatch.setattr(db_fetch, 'fetch_faculty', lambda class_id: seen.append(class_id) or [])
+    monkeypatch.setattr(db_fetch, 'query_exams', lambda q: seen.append(q.class_id) or [])
+    for path in ('/api/courses', '/api/faculty', '/api/exams'):
+        assert client.get(path, headers=h(OTHER_CLASS_TOKEN)).status_code == 200
+    assert seen == [OTHER_CLASS] * 3
 
 
 @pytest.mark.parametrize('method,path,body', [
-    ('post', '/api/courses', {'code': 'CSE-101', 'title': 'X', 'section_faculty': {'A': 1, 'B': 2}}),
-    ('post', '/api/exams', VALID_EXAM),
     ('patch', '/api/exams/7', VALID_EXAM),
     ('delete', '/api/exams/7', None),
-    ('delete', '/api/courses/1', None),
+    ('get', '/api/exams/7', None),
+    ('post', '/api/discord/post/exams/7', None),
 ])
-def test_signed_in_non_cr_is_forbidden(client, method, path, body):
-    kwargs = {'headers': h(STUDENT_TOKEN)}
+def test_other_class_exam_is_not_found(client, method, path, body):
+    kwargs = {'headers': h(OTHER_CLASS_TOKEN)}
     if body is not None:
         kwargs['json'] = body
-    response = getattr(client, method)(path, **kwargs)
-    assert response.status_code == 403
+    assert getattr(client, method)(path, **kwargs).status_code == 404
+    assert client.writes == [] and client.posted == []
+
+
+def test_other_class_course_cannot_get_exams(client):
+    r = client.post('/api/exams', headers=h(OTHER_CLASS_TOKEN), json=VALID_EXAM)
+    assert r.status_code == 422 and r.json()['detail']['field'] == 'course_id'
     assert client.writes == []
+
+
+def test_writes_name_the_class(client):
+    client.post('/api/exams', headers=h(CR_TOKEN), json=VALID_EXAM)
+    client.delete('/api/courses/1', headers=h(OTHER_CLASS_TOKEN))
+    assert client.writes[0][1]['class_id'] == CLASS_ID
+    assert client.writes[1] == ('remove_course', OTHER_CLASS, 1)
 
 
 def test_legacy_unauthenticated_exam_endpoints_are_gone(client):
     assert client.post('/exams', json={'Course Code': 'X'}).status_code in (404, 405)
     assert client.delete('/exams/1').status_code in (404, 405)
-
-
-def test_auth_outage_is_503_not_access(client, monkeypatch):
-    auth.clear_auth_cache()
-
-    def down(token):
-        raise db_fetch.DatabaseError('down', code='unavailable')
-    monkeypatch.setattr(db_fetch, 'fetch_auth_user', down)
-    assert client.get('/api/courses', headers=h(CR_TOKEN)).status_code == 503
+    assert client.post('/webhook', json={}).status_code == 404  # Messenger is gone
 
 
 # --- Course validation ---------------------------------------------------------
@@ -164,7 +226,7 @@ def test_create_exam(client):
     r = client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'client_request_id': '3f1e4c1a-0000-4000-8000-000000000001'})
     assert r.status_code == 201, r.text
     _, kw = client.writes[0]
-    assert kw['user_id'] == CR_ID and kw['client_request_id'] == '3f1e4c1a-0000-4000-8000-000000000001'
+    assert kw['actor'] == CR_USER and kw['client_request_id'] == '3f1e4c1a-0000-4000-8000-000000000001'
     assert kw['syllabus'] == 'Ch 1\nCh 2'
 
 
@@ -210,7 +272,7 @@ def test_invalid_course_section_rejected(client):
 
 
 def test_theoretical_exam_needs_section_teacher(client, monkeypatch):
-    course = {**COURSES[0], 'archived_at': None, 'section_faculty': {'A': COURSES[0]['faculty'][0]}}
+    course = {**COURSES[0], 'class_id': CLASS_ID, 'archived_at': None, 'section_faculty': {'A': COURSES[0]['faculty'][0]}}
     monkeypatch.setattr(db_fetch, 'fetch_course', lambda cid: course)
     assert client.post('/api/exams', headers=h(CR_TOKEN), json={**VALID_EXAM, 'course_section': 'A'}).status_code == 201
     for course_section in ('B', None):
@@ -284,79 +346,79 @@ def test_preview_both_sections_lists_each_teacher(client):
     assert '👤 Faculty: Course Section A: Nazmul Hasan · Course Section B: Fairooz Tasnia' in text
 
 
-# --- Webhook -------------------------------------------------------------------
-def _messenger_event(mid, text='next exam?'):
-    return {'entry': [{'messaging': [{'sender': {'id': 'S1'}, 'message': {'mid': mid, 'text': text}}]}]}
+
+# --- Post to Discord -----------------------------------------------------------
+@pytest.fixture
+def exams_this_week(monkeypatch):
+    rows = [exam_row(1, 1, 'CT 2', '2026-10-20', exam_time='10:00:00', syllabus='Ch 3'),
+            exam_row(2, 3, 'Lab Test', '2026-10-21', notes_link='https://drive.example/n')]
+    monkeypatch.setattr(cr_api.dr, 'now_local', lambda clock=None: __import__('conftest').clock_at('2026-10-18T09:00')())
+    monkeypatch.setattr(db_fetch, 'query_exams', lambda q: [r for r in rows
+                                                            if q.date_from.isoformat() <= r['exam_date']
+                                                            and (q.date_to is None or r['exam_date'] <= q.date_to.isoformat())])
+    return rows
 
 
-def test_webhook_verification(client):
-    # Facebook's real request uses dotted names.
-    ok = client.get('/webhook', params={'hub.mode': 'subscribe', 'hub.verify_token': main.VERIFY_TOKEN, 'hub.challenge': '42'})
-    assert ok.status_code == 200 and ok.text == '42'
-    ok_underscore = client.get('/webhook', params={'hub_mode': 'subscribe', 'hub_verify_token': main.VERIFY_TOKEN, 'hub_challenge': '42'})
-    assert ok_underscore.text == '42'
-    bad = client.get('/webhook', params={'hub.mode': 'subscribe', 'hub.verify_token': 'nope', 'hub.challenge': '42'})
-    assert bad.status_code == 403
-    assert client.get('/webhook').status_code == 403
-
-
-def test_webhook_replies_once_and_splits_long_answers(client, monkeypatch):
-    sent = []
-    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: sent.append((rid, text)))
-    monkeypatch.setattr(main, 'answer', lambda message: type('R', (), {'messages': ['part 1', 'part 2']})())
-    event = _messenger_event('m-1')
-    assert client.post('/webhook', json=event).status_code == 200
-    assert client.post('/webhook', json=event).status_code == 200   # Messenger retry
-    assert sent == [('S1', 'part 1'), ('S1', 'part 2')]
-
-
-def test_webhook_ignores_echoes_and_non_text(client, monkeypatch):
-    sent = []
-    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: sent.append(text))
-    body = {'entry': [{'messaging': [
-        {'sender': {'id': 'S1'}, 'message': {'mid': 'e1', 'text': 'x', 'is_echo': True}},
-        {'sender': {'id': 'S1'}, 'message': {'mid': 'e2', 'attachments': []}},
-    ]}]}
-    assert client.post('/webhook', json=body).status_code == 200
-    assert sent == []
-
-
-@pytest.mark.parametrize('payload,question', [
-    ('NEXT_EXAM_DATE', 'When is the next exam?'),
-    ('NEXT_EXAM_SYLLABUS', 'What is the syllabus of the next exam?'),
-    ('NEXT_EXAM_NOTES', 'Notes of the next exam'),
-    ('NEXT_WEEK_UPDATE', 'What exams are scheduled next week?'),
+@pytest.mark.parametrize('kind,expect', [
+    ('this_week', "This week's exams"), ('next_week', "Next week's exams"),
+    ('next_exam_day', 'Next exam day'), ('next_exam_notes', 'Notes for the next exam day'),
 ])
-def test_webhook_answers_ice_breakers(client, monkeypatch, payload, question):
-    asked, sent = [], []
-    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: sent.append((rid, text)))
-    monkeypatch.setattr(main, 'answer', lambda message: asked.append(message) or type('R', (), {'messages': ['ok']})())
-    event = {'entry': [{'messaging': [{'sender': {'id': 'S9'}, 'postback': {'mid': f'pb-{payload}', 'title': 'x', 'payload': payload}}]}]}
-    assert client.post('/webhook', json=event).status_code == 200
-    assert client.post('/webhook', json=event).status_code == 200   # retry answered once
-    assert asked == [question] and sent == [('S9', 'ok')]
+def test_post_update_to_class_channel(client, exams_this_week, kind, expect):
+    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': kind})
+    assert r.status_code == 200, r.text
+    channel, messages = client.posted[0]
+    assert channel == CLASSES[CLASS_ID]['discord_channel_id']
+    assert expect in messages[0]
 
 
-def test_webhook_unknown_postback_uses_title(client, monkeypatch):
-    asked = []
-    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: None)
-    monkeypatch.setattr(main, 'answer', lambda message: asked.append(message) or type('R', (), {'messages': ['ok']})())
-    event = {'entry': [{'messaging': [{'sender': {'id': 'S9'}, 'postback': {'title': 'Exams this week', 'payload': 'OLD'}}]}]}
-    client.post('/webhook', json=event)
-    assert asked == ['Exams this week']
+def test_post_single_exam(client, exams_this_week):
+    r = client.post('/api/discord/post/exams/7', headers=h(CR_TOKEN))
+    assert r.status_code == 200 and r.json()['exam_count'] == 1
+    assert 'Exam update' in client.posted[0][1][0] and 'CSE-415' in client.posted[0][1][0]
 
 
-def test_webhook_signature_enforced_when_secret_set(client, monkeypatch):
-    sent = []
-    monkeypatch.setattr(main, 'APP_SECRET', 'shh')
-    monkeypatch.setattr(main, '_send_page_message', lambda rid, text: sent.append(text))
-    monkeypatch.setattr(main, 'answer', lambda message: type('R', (), {'messages': ['ok']})())
-    body = json.dumps(_messenger_event('sig-1')).encode()
-    assert client.post('/webhook', content=body, headers={'Content-Type': 'application/json'}).status_code == 403
-    good = 'sha256=' + hmac.new(b'shh', body, hashlib.sha256).hexdigest()
-    r = client.post('/webhook', content=body, headers={'Content-Type': 'application/json', 'X-Hub-Signature-256': good})
-    assert r.status_code == 200 and sent == ['ok']
+def test_double_tap_posts_once(client, exams_this_week):
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_week'}).status_code == 200
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'next_week'}).status_code == 429
+    assert len(client.posted) == 1
+
+
+def test_bot_without_channel_access_is_explained(client, exams_this_week, monkeypatch):
+    def denied(channel, messages):
+        raise discord.DiscordError('403', status=403, code=discord.MISSING_ACCESS)
+    monkeypatch.setattr(discord, 'post_messages', denied)
+    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'})
+    assert r.status_code == 502 and 'Send Messages' in r.json()['detail']['message']
+    # A failed post doesn't block retrying straight away.
+    monkeypatch.setattr(discord, 'post_messages', lambda channel, messages: client.posted.append(channel))
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'}).status_code == 200
+
+
+def test_unlinked_class_cannot_post(client, monkeypatch):
+    monkeypatch.setattr(db_fetch, 'fetch_class', lambda cid: {**CLASSES[CLASS_ID], 'discord_channel_id': None})
+    r = client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'this_week'})
+    assert r.status_code == 409 and '/setup' in r.json()['detail']['message']
+
+
+def test_unknown_post_kind_rejected(client):
+    assert client.post('/api/discord/post', headers=h(CR_TOKEN), json={'kind': 'everything'}).status_code == 422
+
+
+def test_toggle_auto_updates(client, monkeypatch):
+    changes = []
+    monkeypatch.setattr(db_fetch, 'update_class', lambda cid, ch, **kw: changes.append((cid, ch)) or {**CLASSES[cid], **ch})
+    r = client.patch('/api/class', headers=h(CR_TOKEN), json={'auto_updates': False})
+    assert r.status_code == 200 and r.json()['class']['auto_updates'] is False
+    assert changes == [(CLASS_ID, {'auto_updates': False})]
 
 
 def test_health(client):
     assert client.get('/').json() == {'status': 'ok'}
+
+
+def test_cron_tick_needs_secret(client, monkeypatch):
+    assert client.post('/cron/tick').status_code == 404  # not enabled without CRON_SECRET
+    monkeypatch.setenv('CRON_SECRET', 's3cret')
+    monkeypatch.setattr(main.scheduler, 'run_tick', lambda: {'sent': 1})
+    assert client.post('/cron/tick', headers={'X-Cron-Secret': 'nope'}).status_code == 403
+    assert client.post('/cron/tick', headers={'X-Cron-Secret': 's3cret'}).json() == {'result': {'sent': 1}}

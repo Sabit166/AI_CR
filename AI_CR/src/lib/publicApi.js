@@ -1,12 +1,17 @@
-// Read-only client for the student board. No sign-in and no Supabase: it only calls /api/public/*.
+// Read-only client for a class's exam board. No sign-in: it only calls /api/public/classes/<key>/*.
+// Each class's board lives at /c/<key>; the Discord bot shares that link with /exams.
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001').replace(/\/$/, '')
 
-export const MESSENGER_URL = import.meta.env.VITE_MESSENGER_URL || 'https://m.me/61592083183113'
+const KEY_RE = /^\/c\/([0-9a-f-]{36})\/?$/i
 
-export async function publicApi(path, { signal } = {}) {
+export function classKeyFromPath(pathname = window.location.pathname) {
+  return pathname.match(KEY_RE)?.[1] ?? null
+}
+
+export async function publicApi(classKey, path = '', { signal } = {}) {
   let response
   try {
-    response = await fetch(`${API_BASE_URL}/api/public${path}`, { signal })
+    response = await fetch(`${API_BASE_URL}/api/public/classes/${classKey}${path}`, { signal })
   } catch (error) {
     if (error.name === 'AbortError') throw error
     throw new Error('Could not reach the server. Check your connection and try again.', { cause: error })
@@ -14,7 +19,9 @@ export async function publicApi(path, { signal } = {}) {
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = payload?.detail
-    throw new Error(detail?.message ?? (typeof detail === 'string' ? detail : `Request failed (${response.status})`))
+    const error = new Error(detail?.message ?? (typeof detail === 'string' ? detail : `Request failed (${response.status})`))
+    error.status = response.status
+    throw error
   }
   return payload
 }

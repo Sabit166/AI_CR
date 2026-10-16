@@ -15,8 +15,10 @@ os.environ['SUPABASE_URL'] = 'http://127.0.0.1:9/rest/v1'
 os.environ['SUPABASE_API_KEY'] = 'test-key-not-real'
 os.environ['OPENAI_API_KEY'] = ''
 os.environ['MODEL'] = ''
-os.environ['PAGE_ACCESS_TOKEN'] = 'test-page-token'
-os.environ['MESSENGER_APP_SECRET'] = ''
+os.environ['DISCORD_BOT_TOKEN'] = ''
+os.environ['SCHEDULER_ENABLED'] = '0'
+os.environ['EDITOR_LINK_SECRET'] = 'test-editor-link-secret-0123456789abcdef'
+os.environ['SITE_URL'] = 'https://board.example'
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -25,6 +27,8 @@ if str(ROOT) not in sys.path:
 import date_ranges as dr  # noqa: E402
 from Chatbot.catalog import Catalog, CatalogCache, build_catalog  # noqa: E402
 from db_fetch import ExamQuery  # noqa: E402
+
+CLASS_ID = 1
 
 EXAM_TYPES = [
     {'name': 'CT 1', 'course_type': 'Theoretical', 'sort_order': 10, 'is_legacy': False},
@@ -72,7 +76,7 @@ def catalog() -> Catalog:
 
 @pytest.fixture
 def cache(catalog) -> CatalogCache:
-    return CatalogCache(loader=lambda: catalog, ttl=3600)
+    return CatalogCache(loader=lambda class_id: catalog, ttl=3600)
 
 
 def clock_at(iso: str) -> dr.Clock:
@@ -104,7 +108,7 @@ def exam_row(id, course_id, exam_type, exam_date, exam_time='09:00:00', section=
         'faculty_ids': [f['id'] for f in faculty], 'faculty_names': [f['name'] for f in faculty],
         'faculty_source': 'exam' if faculty_ids is not None and not by_section else 'course',
         'exam_faculty_ids': faculty_ids or [], 'legacy_exam_id': None,
-        'created_at': '2026-10-01T00:00:00Z', 'updated_at': '2026-10-01T00:00:00Z',
+        'created_at': '2026-10-01T00:00:00Z', 'updated_at': '2026-10-01T00:00:00Z', 'class_id': CLASS_ID,
     }
 
 
@@ -120,6 +124,8 @@ class FakeRepo:
         self.queries.append(q)
         out = []
         for row in self.rows:
+            if q.class_id is not None and row.get('class_id', CLASS_ID) != q.class_id:
+                continue
             if q.course_ids is not None and row['course_id'] not in q.course_ids:
                 continue
             if q.exam_types is not None and row['exam_type'] not in q.exam_types:

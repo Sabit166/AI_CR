@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MESSENGER_URL, publicApi } from '../lib/publicApi.js'
+import { classKeyFromPath, publicApi } from '../lib/publicApi.js'
 import {
   facultyText,
   formatDay,
@@ -67,7 +67,32 @@ function DayGroups({ groups, today }) {
   })
 }
 
+function NoClass({ message }) {
+  return (
+    <main className="center-screen">
+      <div className="card narrow">
+        <span className="brand-mark brand-mark-large" aria-hidden="true">
+          🎓
+        </span>
+        <h1 className="screen-title">Open your class's exam list from Discord</h1>
+        {message ? <p>{message}</p> : null}
+        <p className="muted">
+          In your class channel, type <strong>/exams</strong>. The bot replies with the link to your class's upcoming exams.
+        </p>
+      </div>
+    </main>
+  )
+}
+
 export default function StudentApp() {
+  const [classKey] = useState(() => classKeyFromPath())
+  if (!classKey) return <NoClass />
+  return <ClassBoard classKey={classKey} />
+}
+
+function ClassBoard({ classKey }) {
+  const [className, setClassName] = useState('')
+  const [notFound, setNotFound] = useState('')
   const [scope, setScope] = useState('upcoming')
   const [courseId, setCourseId] = useState('')
   const [courses, setCourses] = useState([])
@@ -79,19 +104,27 @@ export default function StudentApp() {
 
   useEffect(() => {
     let ignore = false
-    publicApi('/courses').then(
+    publicApi(classKey).then(
+      (result) => {
+        if (ignore) return
+        setClassName(result.name)
+        document.title = `${result.name} · Exams`
+      },
+      (loadError) => !ignore && loadError.status === 404 && setNotFound(loadError.message),
+    )
+    publicApi(classKey, '/courses').then(
       (result) => !ignore && setCourses(result.courses),
       () => {}, // the filter is optional; the exam list reports connection problems
     )
     return () => {
       ignore = true
     }
-  }, [reloadKey])
+  }, [classKey, reloadKey])
 
   useEffect(() => {
     let ignore = false // a slower, older response must not overwrite a newer one
     const course = courseId ? `&course_id=${courseId}` : ''
-    publicApi(`/exams?scope=${scope}&limit=${PAGE_SIZE}&offset=0${course}`).then(
+    publicApi(classKey, `/exams?scope=${scope}&limit=${PAGE_SIZE}&offset=0${course}`).then(
       (result) => {
         if (ignore) return
         setError('')
@@ -107,7 +140,7 @@ export default function StudentApp() {
     return () => {
       ignore = true
     }
-  }, [scope, courseId, reloadKey])
+  }, [classKey, scope, courseId, reloadKey])
 
   // Students often leave the tab open; refresh when they come back to it.
   useEffect(() => {
@@ -141,7 +174,7 @@ export default function StudentApp() {
     setLoadingMore(true)
     try {
       const course = courseId ? `&course_id=${courseId}` : ''
-      const result = await publicApi(`/exams?scope=${scope}&limit=${PAGE_SIZE}&offset=${list.exams.length}${course}`)
+      const result = await publicApi(classKey, `/exams?scope=${scope}&limit=${PAGE_SIZE}&offset=${list.exams.length}${course}`)
       setList((current) => ({ ...current, exams: [...current.exams, ...result.exams], hasMore: result.has_more }))
     } catch (loadError) {
       setError(`Could not load more: ${loadError.message}`)
@@ -152,6 +185,8 @@ export default function StudentApp() {
 
   const selectedCourse = courses.find((c) => String(c.id) === courseId)
 
+  if (notFound) return <NoClass message={notFound} />
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -160,13 +195,10 @@ export default function StudentApp() {
             🎓
           </span>
           <div>
-            <p className="eyebrow">AI CR</p>
-            <p className="brand-name">Exam board</p>
+            <p className="eyebrow">AI CR · Exam board</p>
+            <p className="brand-name">{className || 'Your class'}</p>
           </div>
         </div>
-        <a className="btn btn-ghost btn-small" href={MESSENGER_URL} target="_blank" rel="noopener noreferrer">
-          💬 Ask on Messenger
-        </a>
       </header>
 
       <main className="app-main student-main" id="main">
@@ -243,10 +275,11 @@ export default function StudentApp() {
 
         <footer className="student-footer">
           <p>
-            Have a question? <a href={MESSENGER_URL} target="_blank" rel="noopener noreferrer">Ask AI CR on Messenger</a>.
+            Have a question? Ask in your class channel on Discord: <strong>/ask</strong>, <strong>/next-exam-day</strong>,{' '}
+            <strong>/next-week</strong>…
           </p>
           <p className="muted small">
-            This board is read-only. Spotted a mistake? Tell your CR. · <a href="/cr/">CR sign-in</a> · <a href="/privacy.html">Privacy</a>
+            This list is read-only. Spotted a mistake? Tell your CR. · <a href="/privacy.html">Privacy</a>
           </p>
         </footer>
       </main>

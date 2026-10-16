@@ -13,7 +13,7 @@ from Chatbot.catalog import CatalogCache
 from Chatbot.formatter import DB_ERROR_TEXT
 from Chatbot.intent import Intent, TimeScope
 from Chatbot.retrieval import execute, plan_query
-from conftest import FakeRepo, clock_at, exam_row, make_catalog
+from conftest import CLASS_ID, FakeRepo, clock_at, exam_row, make_catalog
 
 TUESDAY = '2026-10-13T08:00'   # Tue 13 Oct 2026, 08:00 Dhaka
 
@@ -37,7 +37,7 @@ def repo():
 
 
 def ask(message, repo, cache, at=TUESDAY):
-    return answer(message, clock=clock_at(at), repo=repo, cache=cache, use_llm=False)
+    return answer(message, class_id=CLASS_ID, clock=clock_at(at), repo=repo, cache=cache, use_llm=False)
 
 
 def ids_in(reply_text, rows=ROWS):
@@ -254,7 +254,7 @@ def test_no_time_given_falls_back_to_most_recent_past(cache):
 def test_new_course_visible_after_cache_invalidation(repo):
     courses = [dict(c) for c in __import__('conftest').COURSES]
     state = {'courses': courses}
-    cache = CatalogCache(loader=lambda: make_catalog(state['courses']), ttl=3600)
+    cache = CatalogCache(loader=lambda class_id: make_catalog(state['courses']), ttl=3600)
     assert ask('next exam of Compiler Design', repo, cache).outcome == 'unknown'
     state['courses'] = courses + [{'id': 7, 'code': 'CSE-433', 'title': 'Compiler Design', 'course_type': 'Theoretical',
                                    'aliases': [], 'faculty': []}]
@@ -278,7 +278,7 @@ def test_database_failure_is_not_reported_as_no_exams(cache):
 
 
 def test_catalog_failure_is_db_error():
-    def loader():
+    def loader(class_id):
         raise db_fetch.DatabaseError('down', code='unavailable')
     reply = ask('next exam', FakeRepo([]), CatalogCache(loader=loader))
     assert reply.outcome == 'db_error'
@@ -292,7 +292,7 @@ def test_llm_failure_falls_back_to_rules(repo, cache, monkeypatch):
     def boom():
         raise RuntimeError('network down')
     monkeypatch.setattr(intent, '_client', boom)
-    reply = answer('What exams are scheduled next week?', clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
+    reply = answer('What exams are scheduled next week?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
     assert reply.intent_source == 'heuristic'
     assert ids_in(reply.text) == [4, 10, 5, 6]
     assert reply.metrics.llm_calls == 1
@@ -325,7 +325,7 @@ def test_rule_based_time_overrides_llm_misreading_next_week(repo, cache, monkeyp
 
     monkeypatch.setattr(bot, 'llm_parse', lambda message, types: Intent(
         category='exam_query', time=TimeScope('next'), fields=['date'], exam_types=[], source='llm'))
-    reply = answer('What exams are scheduled next week?', clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
+    reply = answer('What exams are scheduled next week?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
     assert date_bounds(repo.queries[0]) == (date(2026, 10, 18), date(2026, 10, 22))
     assert ids_in(reply.text) == [4, 10, 5, 6]
     assert 'ER model' in reply.text            # full details, not just dates
@@ -337,5 +337,18 @@ def test_rule_based_exam_type_fills_llm_gap(repo, cache, monkeypatch):
 
     monkeypatch.setattr(bot, 'llm_parse', lambda message, types: Intent(
         category='exam_query', course_mentions=['DBMS'], time=TimeScope('next'), exam_types=[], source='llm'))
-    answer('When is the next DBMS CT 2?', clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
+    answer('When is the next DBMS CT 2?', class_id=CLASS_ID, clock=clock_at(TUESDAY), repo=repo, cache=cache, use_llm=True)
     assert repo.queries[0].exam_types == ('CT 2',)
+
+
+def test_every_query_is_scoped_to_the_class(repo, cache):
+    ask('What exams are scheduled next week?', repo, cache)
+    ask('next exam of CSE-415', repo, cache)
+    ask('exams on 2026-10-17', repo, cache)
+    assert repo.queries and all(q.class_id == CLASS_ID for q in repo.queries)
+
+
+def test_other_class_rows_are_never_shown(cache):
+    other = {**exam_row(90, 1, 'CT 3', '2026-10-19', syllabus='Other class only'), 'class_id': 2}
+    reply = ask('What exams are scheduled next week?', FakeRepo([other]), cache)
+    assert reply.outcome == 'empty' and 'Other class only' not in reply.text

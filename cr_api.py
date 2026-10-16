@@ -1,11 +1,14 @@
-"""CR dashboard API: courses, faculty and exam records.
+"""CR editor API: courses, faculty and exam records of one class, and posting to Discord.
 
-Every route requires an authenticated CR (see auth.py). Validation here gives
+Every route requires a CR editor link (see auth.py) and only sees the class the
+link was issued for. Validation here gives
 friendly field-level errors; the database functions and triggers enforce the
 same rules again, so a bypassed or buggy client still cannot store invalid data.
 """
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from datetime import date, time as dtime, timedelta
 from typing import Annotated, Literal
@@ -16,13 +19,16 @@ from pydantic import BaseModel, Field, field_validator
 import academic
 import date_ranges as dr
 import db_fetch
+import links
 import public_api
-from auth import CRUser, require_cr
+import updates
+from auth import CRSession, clear_auth_cache, require_cr
 from Chatbot import formatter
 from Chatbot.catalog import catalog_cache
+from discord_bot import client as discord
 
 router = APIRouter(prefix='/api', tags=['cr'])
-CR = Annotated[CRUser, Depends(require_cr)]
+CR = Annotated[CRSession, Depends(require_cr)]
 
 _STATUS_FOR_CODE = {
     'not_found': 404,
@@ -44,10 +50,21 @@ def _db_error(error: db_fetch.DatabaseError) -> HTTPException:
     return _fail(status, str(error), code=error.code)
 
 
-def _data_changed() -> None:
+def _data_changed(class_id: int) -> None:
     """Drop cached copies so students (bot and public board) see the change at once."""
-    catalog_cache.invalidate()
+    catalog_cache.invalidate(class_id)
     public_api.invalidate()
+
+
+def _course(user: CRSession, course_id: int) -> dict | None:
+    """A course of the CR's class (another class's course is reported as missing)."""
+    course = db_fetch.fetch_course(course_id)
+    return course if course and course.get('class_id') == user.class_id else None
+
+
+def _exam(user: CRSession, exam_id: int) -> dict | None:
+    row = db_fetch.get_exam(exam_id)
+    return row if row and row.get('class_id') == user.class_id else None
 
 
 def _clean_text(value: str | None, max_len: int) -> str | None:
@@ -62,9 +79,32 @@ def _clean_text(value: str | None, max_len: int) -> str | None:
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+def _class_view(info: dict) -> dict:
+    return {
+        'id': info['id'], 'name': info['name'], 'auto_updates': info['auto_updates'],
+        'linked': bool(info.get('discord_channel_id')), 'board_url': links.board_url(info['view_key']),
+    }
+
+
 @router.get('/me')
 def me(user: CR) -> dict:
-    return {'id': user.id, 'email': user.email}
+    return {'user_id': user.user_id, 'expires_at': user.expires_at, 'class': _class_view(user.class_info)}
+
+
+class ClassIn(BaseModel):
+    auto_updates: bool
+
+
+@router.patch('/class')
+def update_class(body: ClassIn, user: CR) -> dict:
+    try:
+        row = db_fetch.update_class(user.class_id, {'auto_updates': body.auto_updates})
+    except db_fetch.DatabaseError as error:
+        raise _db_error(error) from error
+    if row is None:
+        raise _fail(404, 'This class no longer exists.')
+    clear_auth_cache()
+    return {'class': _class_view(row)}
 
 
 @router.get('/config')
@@ -83,6 +123,7 @@ def config(user: CR) -> dict:
         'course_sections': list(academic.COURSE_SECTIONS),
         'timezone': dr.TIMEZONE_NAME,
         'today': dr.today_local().isoformat(),
+        'class': _class_view(user.class_info),
     }
 
 
@@ -104,7 +145,7 @@ class FacultyIn(BaseModel):
 @router.get('/faculty')
 def list_faculty(user: CR) -> dict:
     try:
-        return {'faculty': db_fetch.fetch_faculty()}
+        return {'faculty': db_fetch.fetch_faculty(user.class_id)}
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
 
@@ -112,34 +153,34 @@ def list_faculty(user: CR) -> dict:
 @router.post('/faculty', status_code=201)
 def create_faculty(body: FacultyIn, user: CR) -> dict:
     try:
-        row = db_fetch.create_faculty(body.name)
+        row = db_fetch.create_faculty(user.class_id, body.name)
     except db_fetch.DatabaseError as error:
         if error.code == 'duplicate':
             raise _fail(409, f'"{body.name}" is already in the faculty list.', 'name') from error
         raise _db_error(error) from error
-    _data_changed()
+    _data_changed(user.class_id)
     return row
 
 
 @router.patch('/faculty/{faculty_id}')
 def rename_faculty(faculty_id: int, body: FacultyIn, user: CR) -> dict:
     try:
-        row = db_fetch.rename_faculty(faculty_id, body.name)
+        row = db_fetch.rename_faculty(user.class_id, faculty_id, body.name)
     except db_fetch.DatabaseError as error:
         if error.code == 'duplicate':
             raise _fail(409, f'"{body.name}" is already in the faculty list.', 'name') from error
         raise _db_error(error) from error
-    _data_changed()
+    _data_changed(user.class_id)
     return row
 
 
 @router.delete('/faculty/{faculty_id}')
 def remove_faculty(faculty_id: int, user: CR) -> dict:
     try:
-        outcome = db_fetch.remove_faculty(faculty_id)
+        outcome = db_fetch.remove_faculty(user.class_id, faculty_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
-    _data_changed()
+    _data_changed(user.class_id)
     return {'result': outcome}
 
 
@@ -196,16 +237,16 @@ def _validate_course(body: CourseIn) -> tuple[str, list[int], dict[str, int]]:
 @router.get('/courses')
 def list_courses(user: CR) -> dict:
     try:
-        return {'courses': db_fetch.fetch_active_courses(with_exam_counts=True)}
+        return {'courses': db_fetch.fetch_active_courses(user.class_id, with_exam_counts=True)}
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
 
 
-def _save_course(course_id: int | None, body: CourseIn) -> dict:
+def _save_course(user: CRSession, course_id: int | None, body: CourseIn) -> dict:
     code, faculty_ids, section_faculty = _validate_course(body)
     try:
         saved_id = db_fetch.save_course(
-            course_id=course_id, code=code, title=body.title, aliases=body.aliases,
+            class_id=user.class_id, course_id=course_id, code=code, title=body.title, aliases=body.aliases,
             faculty_ids=faculty_ids, section_faculty=section_faculty,
         )
         course = db_fetch.fetch_course(saved_id)
@@ -220,28 +261,28 @@ def _save_course(course_id: int | None, body: CourseIn) -> dict:
             raise _fail(422, str(error), 'section_faculty' if section_faculty else 'faculty_ids') from error
         raise _db_error(error) from error
     finally:
-        _data_changed()
+        _data_changed(user.class_id)
     return course
 
 
 @router.post('/courses', status_code=201)
 def create_course(body: CourseIn, user: CR) -> dict:
-    return _save_course(None, body)
+    return _save_course(user, None, body)
 
 
 @router.patch('/courses/{course_id}')
 def update_course(course_id: int, body: CourseIn, user: CR) -> dict:
-    return _save_course(course_id, body)
+    return _save_course(user, course_id, body)
 
 
 @router.delete('/courses/{course_id}')
 def remove_course(course_id: int, user: CR) -> dict:
     try:
-        outcome = db_fetch.remove_course(course_id)
+        outcome = db_fetch.remove_course(user.class_id, course_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
     finally:
-        _data_changed()
+        _data_changed(user.class_id)
     return {'result': outcome}
 
 
@@ -307,9 +348,9 @@ def _theory_exam_section(course: dict, raw: str | None) -> str | None:
     return course_section
 
 
-def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | None, str | None]:
+def _validate_exam(user: CRSession, body: ExamIn, existing: dict | None) -> tuple[dict, str | None, str | None]:
     """Returns (course, class section, course section)."""
-    course = db_fetch.fetch_course(body.course_id)
+    course = _course(user, body.course_id)
     if course is None:
         raise _fail(422, 'Select a course.', 'course_id')
     if course.get('archived_at') and not (existing and existing['course_id'] == body.course_id):
@@ -343,21 +384,21 @@ def _validate_exam(body: ExamIn, existing: dict | None) -> tuple[dict, str | Non
     return course, section, None
 
 
-def _save_exam(exam_id: int | None, body: ExamIn, user: CRUser) -> dict:
+def _save_exam(exam_id: int | None, body: ExamIn, user: CRSession) -> dict:
     theory = False
     try:
-        existing = db_fetch.get_exam(exam_id) if exam_id is not None else None
+        existing = _exam(user, exam_id) if exam_id is not None else None
         if exam_id is not None and existing is None:
             raise _fail(404, 'Exam record not found.')
-        course, section, course_section = _validate_exam(body, existing)
+        course, section, course_section = _validate_exam(user, body, existing)
         theory = academic.has_course_sections(course['course_type'])
         saved_id = db_fetch.save_exam(
-            exam_id=exam_id, course_id=body.course_id, exam_type=body.exam_type,
+            class_id=user.class_id, exam_id=exam_id, course_id=body.course_id, exam_type=body.exam_type,
             exam_date=body.exam_date, exam_time=body.exam_time, section=section, course_section=course_section,
             syllabus=body.syllabus, venue=body.venue, remarks=body.remarks, notes_link=body.notes_link,
             faculty_ids=[] if theory else sorted(set(body.faculty_ids)),
             client_request_id=str(body.client_request_id) if body.client_request_id and exam_id is None else None,
-            user_id=user.id,
+            actor=user.user_id,
         )
         public_api.invalidate()
         row = db_fetch.get_exam(saved_id)
@@ -387,6 +428,7 @@ def list_exams(
 ) -> dict:
     today = dr.today_local()
     query = db_fetch.ExamQuery(
+        class_id=user.class_id,
         course_ids=(course_id,) if course_id else None,
         date_from=today if scope == 'upcoming' else None,
         date_to=today - timedelta(days=1) if scope == 'past' else None,
@@ -404,7 +446,7 @@ def list_exams(
 @router.get('/exams/{exam_id}')
 def get_exam(exam_id: int, user: CR) -> dict:
     try:
-        row = db_fetch.get_exam(exam_id)
+        row = _exam(user, exam_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
     if row is None:
@@ -425,7 +467,7 @@ def update_exam(exam_id: int, body: ExamIn, user: CR) -> dict:
 @router.delete('/exams/{exam_id}')
 def delete_exam(exam_id: int, user: CR) -> dict:
     try:
-        deleted = db_fetch.delete_exam(exam_id)
+        deleted = _exam(user, exam_id) is not None and db_fetch.delete_exam(exam_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
     finally:
@@ -439,7 +481,7 @@ def delete_exam(exam_id: int, user: CR) -> dict:
 def preview_exam(body: ExamIn, user: CR) -> dict:
     """Exactly what a student would see for this record, using the bot's formatter."""
     try:
-        course = db_fetch.fetch_course(body.course_id)
+        course = _course(user, body.course_id)
     except db_fetch.DatabaseError as error:
         raise _db_error(error) from error
     if course is None:
@@ -469,3 +511,60 @@ def preview_exam(body: ExamIn, user: CR) -> dict:
         'faculty_names': names, 'faculty_source': source, 'section_faculty': section_faculty,
     }
     return {'text': formatter.format_exam(row, [], today=dr.today_local())}
+
+
+# ---------------------------------------------------------------------------
+# Post to the class's Discord channel
+# ---------------------------------------------------------------------------
+POST_COOLDOWN_SECONDS = 20
+_recent_posts: dict[tuple[int, str], float] = {}
+_posts_lock = threading.Lock()
+
+
+class PostIn(BaseModel):
+    kind: Literal['this_week', 'next_week', 'next_exam_day', 'next_exam_notes']
+
+
+def _post(user: CRSession, what: str, build) -> dict:
+    channel = user.class_info.get('discord_channel_id')
+    if not channel:
+        raise _fail(409, 'This class is not linked to a Discord channel yet. Run /setup in the channel first.')
+    key = (user.class_id, what)
+    with _posts_lock:
+        # A double tap (or two CRs at once) must not post the same update twice.
+        if time.monotonic() - _recent_posts.get(key, -1e9) < POST_COOLDOWN_SECONDS:
+            raise _fail(429, 'That update was just posted. Wait a few seconds before posting it again.')
+        _recent_posts[key] = time.monotonic()
+    try:
+        update = build()
+        discord.post_messages(channel, update.messages)
+    except db_fetch.DatabaseError as error:
+        _recent_posts.pop(key, None)
+        raise _db_error(error) from error
+    except discord.DiscordError as error:
+        _recent_posts.pop(key, None)
+        raise _fail(502, error.friendly()) from error
+    return {'posted': len(update.messages), 'exam_count': update.exam_count}
+
+
+@router.post('/discord/post')
+def post_update(body: PostIn, user: CR) -> dict:
+    now = dr.now_local()
+    builders = {
+        'this_week': lambda: updates.week_update(user.class_id, 'this', now),
+        'next_week': lambda: updates.week_update(user.class_id, 'next', now),
+        'next_exam_day': lambda: updates.next_exam_day_update(user.class_id, now),
+        'next_exam_notes': lambda: updates.next_exam_day_update(user.class_id, now, notes_only=True),
+    }
+    return _post(user, body.kind, builders[body.kind])
+
+
+@router.post('/discord/post/exams/{exam_id}')
+def post_exam(exam_id: int, user: CR) -> dict:
+    try:
+        row = _exam(user, exam_id)
+    except db_fetch.DatabaseError as error:
+        raise _db_error(error) from error
+    if row is None:
+        raise _fail(404, 'Exam record not found.')
+    return _post(user, f'exam:{exam_id}', lambda: updates.exam_update(row, dr.now_local()))

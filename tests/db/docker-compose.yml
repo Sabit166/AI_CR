@@ -16,8 +16,9 @@ services:
       - ../../supabase/migrations/20261013031917_dynamic_course_config.sql:/docker-entrypoint-initdb.d/30_dynamic_course_config.sql:ro
       - ../../supabase/migrations/20261013150000_course_rules_update.sql:/docker-entrypoint-initdb.d/40_course_rules_update.sql:ro
       - ../../supabase/migrations/20261014074933_theory_course_sections.sql:/docker-entrypoint-initdb.d/50_theory_course_sections.sql:ro
+      - ../../supabase/migrations/20261016120000_discord_classes.sql:/docker-entrypoint-initdb.d/60_discord_classes.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres && psql -U postgres -tAc \"select 1 from pg_tables where tablename='exams'\" | grep -q 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres && psql -U postgres -tAc \"select 1 from pg_tables where tablename='class_notifications'\" | grep -q 1"]
       interval: 2s
       retries: 30
   rest:

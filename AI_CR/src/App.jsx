@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import { api, ApiError } from './lib/api.js'
-import { supabase, supabaseConfigured } from './lib/supabase.js'
-import LoginScreen from './components/LoginScreen.jsx'
+import { editorToken, forgetToken } from './lib/session.js'
 import ExamsView from './components/ExamsView.jsx'
 import CoursesView from './components/CoursesView.jsx'
 import FacultyView from './components/FacultyView.jsx'
@@ -34,105 +33,104 @@ function initialTab() {
   return TABS.some((tab) => tab.id === hash) ? hash : 'exams'
 }
 
+function LinkScreen({ title, children }) {
+  return (
+    <main className="center-screen">
+      <div className="card narrow">
+        <span className="brand-mark brand-mark-large" aria-hidden="true">
+          CR
+        </span>
+        <h1 className="screen-title">{title}</h1>
+        {children}
+        <p className="muted">
+          In your class's Discord channel, type <strong>/manage</strong>. The bot sends you a private link that opens
+          this editor for that class. Only CRs get the link.
+        </p>
+      </div>
+    </main>
+  )
+}
+
 function App() {
-  const [session, setSession] = useState(undefined) // undefined = still checking
-  const [authState, setAuthState] = useState({ status: 'idle', message: '' })
+  const [hasToken] = useState(() => Boolean(editorToken()))
+  const [linkState, setLinkState] = useState({ status: 'ok', message: '' })
   const [tab, setTab] = useState(initialTab)
   const [data, setData] = useState({ config: null, courses: [], faculty: [] })
   const [dataState, setDataState] = useState({ loading: true, error: '' })
   const { toasts, notify, dismiss } = useToasts()
+  const [reloadKey, setReloadKey] = useState(0)
 
-  useEffect(() => {
-    if (!supabaseConfigured) return undefined
-    supabase.auth.getSession().then(({ data: result }) => setSession(result.session))
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
-    return () => listener.subscription.unsubscribe()
+  const handleAuthError = useCallback((error) => {
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+      forgetToken()
+      setLinkState({ status: 'expired', message: error.message })
+      return true
+    }
+    return false
   }, [])
 
-  const [reloadKey, setReloadKey] = useState(0)
-  const userId = session?.user?.id
-
   useEffect(() => {
-    if (!userId) return undefined
+    if (!hasToken) return undefined
     let ignore = false
     Promise.all([api('/api/config'), api('/api/courses'), api('/api/faculty')]).then(
       ([config, courses, faculty]) => {
         if (ignore) return
         setData({ config, courses: courses.courses, faculty: faculty.faculty })
-        setAuthState({ status: 'ok', message: '' })
         setDataState({ loading: false, error: '' })
       },
       (error) => {
         if (ignore) return
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          setAuthState({ status: error.status === 403 ? 'forbidden' : 'expired', message: error.message })
-        }
+        handleAuthError(error)
         setDataState({ loading: false, error: error.message })
       },
     )
     return () => {
       ignore = true
     }
-  }, [userId, reloadKey])
+  }, [hasToken, reloadKey, handleAuthError])
 
   const reloadCatalog = useCallback(async () => {
     try {
       const [courses, faculty] = await Promise.all([api('/api/courses'), api('/api/faculty')])
       setData((current) => ({ ...current, courses: courses.courses, faculty: faculty.faculty }))
     } catch (error) {
-      notify(`Saved, but refreshing the list failed: ${error.message}`, 'error')
+      if (!handleAuthError(error)) notify(`Saved, but refreshing the list failed: ${error.message}`, 'error')
     }
-  }, [notify])
+  }, [notify, handleAuthError])
+
+  const setClassInfo = useCallback(
+    (info) => setData((current) => ({ ...current, config: { ...current.config, class: info } })),
+    [],
+  )
 
   function selectTab(id) {
     setTab(id)
     window.history.replaceState(null, '', `#${id}`)
   }
 
-  async function signOut() {
-    await supabase.auth.signOut()
-    setData({ config: null, courses: [], faculty: [] })
-    setAuthState({ status: 'idle', message: '' })
+  function leave() {
+    forgetToken()
+    setLinkState({ status: 'left', message: '' })
   }
 
-  if (!supabaseConfigured) {
+  if (!hasToken || linkState.status === 'left') {
     return (
-      <main className="center-screen">
-        <Banner>
-          Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY for the dashboard build.
-        </Banner>
-      </main>
+      <LinkScreen title="Open the editor from Discord">
+        {linkState.status === 'left' ? <p>You closed the editor on this device.</p> : null}
+      </LinkScreen>
     )
   }
 
-  if (session === undefined) {
+  if (linkState.status === 'expired') {
     return (
-      <main className="center-screen">
-        <LoadingBlock label="Checking sign-in…" />
-      </main>
+      <LinkScreen title="This link has expired">
+        <p>{linkState.message}</p>
+      </LinkScreen>
     )
   }
 
-  if (!session) {
-    return <LoginScreen />
-  }
-
-  if (authState.status === 'forbidden' || authState.status === 'expired') {
-    return (
-      <main className="center-screen">
-        <div className="card narrow">
-          <h1 className="screen-title">{authState.status === 'forbidden' ? 'Not a CR account' : 'Session expired'}</h1>
-          <p>{authState.message}</p>
-          <p className="muted">Signed in as {session.user.email}</p>
-          <button type="button" className="btn btn-primary btn-block" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-      </main>
-    )
-  }
-
-  const shared = { data, notify, reloadCatalog }
+  const classInfo = data.config?.class
+  const shared = { data, notify, reloadCatalog, onAuthError: handleAuthError }
 
   return (
     <div className="app-shell">
@@ -141,9 +139,9 @@ function App() {
           <span className="brand-mark" aria-hidden="true">
             CR
           </span>
-          <div>
-            <p className="eyebrow">AI CR dashboard</p>
-            <p className="brand-name">Class exam updates</p>
+          <div className="grow">
+            <p className="eyebrow">CR editor</p>
+            <p className="brand-name">{classInfo?.name ?? 'Class exam updates'}</p>
           </div>
         </div>
         <nav className="tabs-top" aria-label="Sections">
@@ -159,8 +157,8 @@ function App() {
             </button>
           ))}
         </nav>
-        <button type="button" className="btn btn-ghost btn-small" onClick={signOut}>
-          Sign out
+        <button type="button" className="btn btn-ghost btn-small" onClick={leave}>
+          Close
         </button>
       </header>
 
@@ -175,10 +173,12 @@ function App() {
             {dataState.error}
           </Banner>
         ) : null}
-        {dataState.loading && !data.config ? <LoadingBlock label="Loading your courses…" /> : null}
+        {dataState.loading && !data.config ? <LoadingBlock label="Loading your class…" /> : null}
         {data.config ? (
           <>
-            {tab === 'exams' ? <ExamsView {...shared} goToCourses={() => selectTab('courses')} /> : null}
+            {tab === 'exams' ? (
+              <ExamsView {...shared} setClassInfo={setClassInfo} goToCourses={() => selectTab('courses')} />
+            ) : null}
             {tab === 'courses' ? <CoursesView {...shared} goToFaculty={() => selectTab('faculty')} /> : null}
             {tab === 'faculty' ? <FacultyView {...shared} /> : null}
           </>

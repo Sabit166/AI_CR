@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="description" content="How the AI CR exam bot and exam board handle your data." />
+    <meta name="description" content="How the AI CR Discord bot and exam list handle your data." />
     <title>AI CR · Privacy Policy</title>
     <style>
       :root {
@@ -34,47 +34,51 @@
   <body>
     <main>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: 15 October 2026</p>
+      <p class="updated">Last updated: 16 October 2026</p>
 
       <p>
         AI CR is a student project that helps students find exam dates, syllabus and notes
-        posted by their class representatives (CRs). It has two parts: a Messenger chatbot on our
-        Facebook Page and the exam board website. This policy explains what data each part uses.
+        posted by their class representatives (CRs). It has two parts: a Discord bot in each class's
+        channel and the exam list website. This policy explains what data each part uses.
       </p>
 
-      <h2>The Messenger chatbot</h2>
-      <p>When you send a message to our Facebook Page, Facebook forwards it to our server together with your Page-scoped ID (a number Facebook assigns to you for this Page only). We use them to:</p>
+      <h2>The Discord bot</h2>
+      <p>When you use one of the bot's slash commands, Discord sends our server the command, the channel and server it was used in, your Discord user ID and your roles and permissions in that channel. We use them to:</p>
       <ul>
-        <li>work out what you are asking. The text of your message is sent to OpenAI's API, which classifies it as a question about a course, date or exam type;</li>
-        <li>look up matching exams in our database, which holds only exam information posted by CRs;</li>
-        <li>send the answer back to you through Facebook Messenger.</li>
+        <li>find the class that channel belongs to and look up its exams in our database, which holds only exam information posted by CRs;</li>
+        <li>check whether you are a CR before giving you the editor link;</li>
+        <li>for <code>/ask</code> only: work out what you are asking. The text of your question is sent to OpenAI's API, which classifies it as a question about a course, date or exam type.</li>
       </ul>
       <p>
-        <strong>We do not save your messages, your name or your Facebook ID.</strong> The ID is held only in memory
-        while we reply. Our server logs record that a message was answered and how long it took, never what it said
-        or who sent it. Facebook keeps its own copy of the conversation under
-        <a href="https://www.facebook.com/privacy/policy/">Meta's Privacy Policy</a>, and OpenAI handles API requests under
+        <strong>We do not save your questions or your name.</strong> When a CR saves an exam, we store the Discord user ID
+        of the CR who saved it. Our server logs record which command was used and how long it took, never what was asked
+        or who asked. Discord keeps the messages in your server under
+        <a href="https://discord.com/privacy">Discord's Privacy Policy</a>, and OpenAI handles API requests under
         <a href="https://openai.com/policies/privacy-policy/">its own policy</a>, which does not use API data for training.
       </p>
-
-      <h2>The exam board website</h2>
       <p>
-        Students can browse the exam board without an account. It uses no cookies, analytics or advertising trackers.
-        Our hosting providers (Vercel and Render) may keep standard access logs, such as IP address and request time, for security.
+        The bot also posts exam updates in the class channel (every Friday, the evening before an exam day, and when a CR
+        asks it to). For each class we store its name, its Discord server, channel and CR role IDs, and a record of which
+        automatic updates were posted.
       </p>
+
+      <h2>The exam list website</h2>
       <p>
-        CRs sign in with an email address and password, managed by Supabase. We store the CR's email address and the
-        exam details they post. The sign-in session is kept in the CR's browser.
+        Each class's exam list opens from a link the bot shares in that class's channel; there are no accounts.
+        It uses no cookies, analytics or advertising trackers. CRs open the editor from a private link the bot sends them;
+        the link expires after a few hours and is kept only in that browser tab.
+        Our hosting providers (Vercel and Render) may keep standard access logs, such as IP address and request time, for security.
       </p>
 
       <h2>Sharing</h2>
       <p>We do not sell or share your data with anyone other than the service providers named above, which we need to run the bot and the website.</p>
 
       <h2>Deleting your data</h2>
-      <p>See our <a href="/data-deletion.html">data deletion instructions</a>.</p>
-
-      <h2>Contact</h2>
-      <p>For any question about this policy, send a message to our Facebook Page on <a href="https://m.me/61592083183113">Messenger</a>.</p>
+      <p>
+        We hold no data about students. A CR who wants the Discord user ID removed from the exams they saved, or a class
+        that wants all its data deleted, can ask the project maintainer through their CR or server admin.
+        Removing the bot from a server stops it from receiving anything from that server.
+      </p>
     </main>
   </body>
 </html>

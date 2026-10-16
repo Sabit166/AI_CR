@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
+import DiscordPanel from './DiscordPanel.jsx'
 import ExamForm from './ExamForm.jsx'
 import { facultyText, formatDay, formatTime, groupByDay, sectionText } from '../lib/format.js'
 import { Banner, ConfirmDialog, EmptyState, LoadingBlock, Spinner } from './ui.jsx'
 
 const PAGE_SIZE = 20
 
-export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) {
+export default function ExamsView({ data, notify, reloadCatalog, goToCourses, setClassInfo }) {
   const [scope, setScope] = useState('upcoming')
   const [list, setList] = useState({ exams: [], hasMore: false, today: null })
   const [loading, setLoading] = useState(true)
@@ -15,6 +16,8 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
   const [editing, setEditing] = useState(null) // null | 'new' | exam
   const [pendingDelete, setPendingDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [pendingPost, setPendingPost] = useState(null)
+  const [posting, setPosting] = useState(false)
 
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -85,6 +88,19 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
     }
   }
 
+  async function confirmPost() {
+    setPosting(true)
+    try {
+      await api(`/api/discord/post/exams/${pendingPost.id}`, { method: 'POST' })
+      notify(`Posted ${pendingPost.course_code} ${pendingPost.exam_type} to Discord.`)
+      setPendingPost(null)
+    } catch (postError) {
+      notify(`Not posted: ${postError.message}`, 'error')
+    } finally {
+      setPosting(false)
+    }
+  }
+
   if (editing) {
     return (
       <ExamForm
@@ -109,6 +125,8 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
           + New exam
         </button>
       </div>
+
+      <DiscordPanel classInfo={data.config.class} notify={notify} setClassInfo={setClassInfo} />
 
       {noCourses ? (
         <EmptyState
@@ -147,7 +165,7 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
 
       {!loading && !error && list.exams.length === 0 ? (
         <EmptyState title={scope === 'upcoming' ? 'No upcoming exams posted' : 'No past exams'}>
-          {scope === 'upcoming' ? 'Exams you add here are what students get from the Messenger bot.' : null}
+          {scope === 'upcoming' ? 'Exams you add here are what the Discord bot tells your class.' : null}
         </EmptyState>
       ) : null}
 
@@ -174,6 +192,11 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
                       {facultyText(exam) ? <p className="muted small">👤 {facultyText(exam)}</p> : null}
                     </div>
                     <div className="card-actions">
+                      {scope === 'upcoming' && data.config.class.linked ? (
+                        <button type="button" className="btn btn-ghost btn-small" onClick={() => setPendingPost(exam)}>
+                          📣 Post
+                        </button>
+                      ) : null}
                       <button type="button" className="btn btn-ghost btn-small" onClick={() => setEditing(exam)}>
                         Edit
                       </button>
@@ -211,6 +234,23 @@ export default function ExamsView({ data, notify, reloadCatalog, goToCourses }) 
           <p>
             {pendingDelete.course_code} {pendingDelete.exam_type} on {formatDay(pendingDelete.exam_date)} will be removed and
             students will no longer see it.
+          </p>
+        ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(pendingPost)}
+        title="Post this exam to Discord?"
+        confirmLabel="Post"
+        tone="primary"
+        busy={posting}
+        onConfirm={confirmPost}
+        onCancel={() => setPendingPost(null)}
+      >
+        {pendingPost ? (
+          <p>
+            {pendingPost.course_code} {pendingPost.exam_type} on {formatDay(pendingPost.exam_date)}, with its time, syllabus and
+            notes, will be posted in the class channel for everyone.
           </p>
         ) : null}
       </ConfirmDialog>

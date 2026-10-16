@@ -2,11 +2,9 @@
 
 # 🎓 AI CR
 
-### Your class representative's assistant — exam dates, syllabus and updates, one message away
+### Your class representative's assistant on Discord — exam dates, syllabus and notes, one command away
 
-*Ask on Messenger. Get the answer straight from what your CR posted.*
-
-[**💬 Ask on Messenger**](https://m.me/61592083183113) &nbsp;·&nbsp; [**🗓️ Open the exam board**](https://ai-cr-three.vercel.app/)
+*Type a slash command in your class channel. Get the answer straight from what your CR posted.*
 
 </div>
 
@@ -17,6 +15,7 @@
 - [What is AI CR?](#-what-is-ai-cr)
 - [For students](#-for-students)
 - [For class representatives](#-for-class-representatives)
+- [Setting up a new class](#-setting-up-a-new-class)
 - [How the week works](#-how-the-week-works)
 - [Frequently asked questions](#-frequently-asked-questions)
 
@@ -27,82 +26,64 @@
 Every term, the same questions fill the class group:
 *"When is the next CT?"* · *"What's the syllabus?"* · *"Which exams are next week?"*
 
-**AI CR** answers them for you. Your class representative posts each exam once, and the
-assistant on our class **Facebook Page** replies to everyone, any time of day, with
-exactly what was posted — no guessing, no outdated screenshots.
+**AI CR** is a Discord bot that answers them. **Each class has its own channel**, and in that channel the bot only
+knows that class's courses and exams. Your CR posts each exam once; the bot answers everyone, any time, with exactly
+what was posted — and announces next week's exams and tomorrow's exams on its own.
 
 | | |
 |---|---|
-| 💬 **Students** | [Ask on Messenger](https://m.me/61592083183113) in your own words, or browse the [exam board](https://ai-cr-three.vercel.app/). |
-| 🗂️ **Class representatives** | Keep the term's courses, teachers and exams up to date from your phone. |
+| 💬 **Students** | Use the slash commands in your class channel, or open your class's exam list with `/exams`. |
+| 🗂️ **Class representatives** | `/manage` opens the editor for your class — no account, no password. |
 
 ---
 
 ## 🎒 For students
 
-There are two ways to check your exams — no account needed for either.
+### Slash commands
 
-### 🗓️ The exam board
+Type `/` in your class channel and pick a command. The answer is shown **only to you**, so the channel stays tidy.
 
-**🔗 [https://ai-cr-three.vercel.app/](https://ai-cr-three.vercel.app/)**
+| Command | What you get |
+|---|---|
+| `/this-week` | This week's remaining exams (today until Thursday) |
+| `/next-week` | Next week's exams, Sunday to Thursday |
+| `/next-exam-day` | **Every** exam on the next day that has one — times, sections, syllabus, venue, teachers |
+| `/next-exam-notes` | The notes links for the exams on the next exam day |
+| `/exams` | A button that opens your class's list of upcoming exams |
+| `/ask` | Ask in your own words, e.g. *"When is the next CT of CSE-415?"* |
 
-A simple page listing every upcoming exam, grouped into **This week**, **Next week** and **Later**:
+### Updates in the channel
 
-- each exam's **course, type, date, time, section and syllabus**
-- **Today**, **Tomorrow** and **In 3 days** labels so nothing sneaks up on you
-- a **course filter** to see only one subject
-- a **Past** tab for exams that are already done
+You don't even have to ask:
 
-The board is read-only — you can look, but only CRs can change anything.
+- **Every Friday at 6 PM** the bot posts **next week's exams**.
+- **At 8 PM the evening before an exam day** it posts all of that day's exams, with the time of each one.
+- Your CR can also post an update at any time — for a week, or for a single exam.
 
-> 📱 **Tip:** add it to your phone's home screen (browser menu → **Add to Home Screen**) and it opens like an app.
+### The exam list
 
-### 💬 Ask on Messenger
+`/exams` gives you a link to your class's exam list: every upcoming exam grouped into **This week**, **Next week** and
+**Later**, with syllabus, times and notes, a course filter and a **Past** tab. It's read-only, needs no account and
+shows only your class.
 
-**🔗 [https://m.me/61592083183113](https://m.me/61592083183113)**
+> 📱 **Tip:** open it once and use your browser's **Add to Home Screen** — it then opens like an app.
 
-Message our class **Facebook Page** and type your question — in plain English, the way you'd ask a classmate.
-
-New to the chat? Just tap one of the ready-made questions: **Next exam date**, **Next exam syllabus**,
-**Next exam notes** or **Next week's update**.
-
-### Questions you can ask
+### Asking with `/ask`
 
 | You want to know… | Try asking |
 |---|---|
-| 🗓️ This week's exams | *"What exams do we have this week?"* · *"What's left this week?"* |
-| 📅 Next week's exams | *"What exams are scheduled next week?"* · *"Next week's updates"* |
-| ⏭️ The next exam | *"When is the next exam?"* · *"Next CT of CSE-415?"* |
 | 📖 A syllabus | *"Syllabus of the next Database CT"* · *"What's in HCI CT 2?"* |
 | ☀️ A particular day | *"Anything tomorrow?"* · *"Exams on Monday"* · *"What's on 27 October?"* |
 | 👩‍🏫 A teacher's exams | *"Next exam of Nafisa madam"* |
 | 🧑‍🤝‍🧑 Your section | *"Next week's exams for section A"* |
 | 📚 A whole course | *"All upcoming exams of CSE-464"* |
 
-### Ways to name a course
+You don't need the exact course title. A **course code** (`CSE-415`, `cse 415`), the **full title**
+(*Human Computer Interface*), a **short name** (*HCI*, *DBMS*) or **a subject word** (*"the database exam"*) all work.
+If your words could mean more than one course, the bot asks which one — ask again with the course code.
 
-You don't need the exact title. Any of these work:
-
-- **Course code** — `CSE-415`, `cse 415`, `CSE415`, or just `415`
-- **Full title** — *Human Computer Interface*
-- **Short name** — *HCI*, *SDP 2*, *DBMS*
-- **A subject word** — *"the database exam"*
-
-If your words could mean more than one course, the assistant will ask which one you mean — just reply with the course code.
-
-### What you'll get
-
-```
-📘 CSE-415 · Human Computer Interface
-📝 CT 2 · Section A
-🗓 Monday, 3 August 2026 · 8:00 AM
-📖 Syllabus:
-Chapter 2 (full)
-Chapter 3 up to 3.4
-👤 Faculty: …
-```
-
-Everything in a reply comes from what your CR posted. If something hasn't been posted yet, the assistant says so plainly — it never makes up a date or a syllabus.
+Everything the bot says comes from what your CR posted. If something hasn't been posted yet, it says so plainly — it
+never makes up a date or a syllabus.
 
 > 💡 **Tip:** If a date or syllabus looks wrong, tell your CR — once they fix it, every answer updates immediately.
 
@@ -110,21 +91,25 @@ Everything in a reply comes from what your CR posted. If something hasn't been p
 
 ## 🧑‍💼 For class representatives
 
-### Your dashboard
+### Who counts as a CR
 
-Open the CR dashboard on your phone or laptop:
+In a class channel, you're a CR if you have the **Manage Channels** permission there, or the **CR role** chosen when
+the class was set up. Nobody else can open the editor.
 
-**🔗 [https://ai-cr-three.vercel.app/cr/](https://ai-cr-three.vercel.app/cr/)**
+### Opening the editor
 
-Sign in with the email and password set up for you. Only approved class representatives can sign in. (Students use the read-only [exam board](https://ai-cr-three.vercel.app/) instead — it has a small **CR sign-in** link at the bottom.)
+1. In your class channel, type **`/manage`**.
+2. The bot replies with an **Open CR editor** button that **only you can see**.
+3. Tap it — the editor opens straight into your class. No sign-in.
 
-> 📱 Tip: on your phone, use your browser's **Add to Home Screen** to open it like an app.
+The link works for **12 hours**; after that, run `/manage` again. **Don't share it**: anyone with the link can edit
+your class's exams until it expires.
 
-The dashboard has three tabs at the bottom of the screen:
+The editor has three tabs at the bottom of the screen:
 
 | Tab | What it's for |
 |---|---|
-| 🗓 **Exams** | Post, edit and delete exam updates |
+| 🗓 **Exams** | Post, edit and delete exams, and post updates to Discord |
 | 📘 **Courses** | This term's courses and who teaches them |
 | 👤 **Faculty** | The list of teachers |
 
@@ -134,7 +119,7 @@ The dashboard has three tabs at the bottom of the screen:
 2. **Courses** → **+ Add course** for every course this term:
    - Type the **course code** (e.g. `CSE-415`). Whether it's Theoretical or Sessional is filled in for you.
    - Enter the **course title**.
-   - Add any **short names** students use (e.g. *HCI*, *DBMS*) so the assistant recognises them.
+   - Add any **short names** students use (e.g. *HCI*, *DBMS*) so `/ask` recognises them.
    - Choose the **course teachers**. A Theoretical course has two course sections, **A** and **B**: pick the
      teacher for each. The same teacher can take both sections. For a Sessional course, tick as many teachers as
      take it.
@@ -160,13 +145,30 @@ The dashboard has three tabs at the bottom of the screen:
    posted, its date and time are filled in for you, and saving a new date or time moves both.
 6. Write the **syllabus**. Line breaks are kept exactly as you type them.
 7. Optionally open **More details** for venue, a notes link, or remarks.
-8. Tap **Preview** to see exactly what students will receive, then **Save exam**.
+8. Tap **Preview** to check it, then **Save exam**.
 
-Students can ask about it — and see it on the exam board — the moment you save.
+Students see it in the bot's answers and on the exam list the moment you save. To announce it in the channel, tap
+**📣 Post** on the exam.
+
+### 📣 Posting to the class channel
+
+At the top of **Exams** there are four buttons. Each asks you to confirm, then posts in the class channel for everyone:
+
+| Button | Posts |
+|---|---|
+| **This week** | This week's remaining exams |
+| **Next week** | Next week's exams |
+| **Next exam day** | Every exam on the next exam day, with times |
+| **Next exam notes** | The notes links for the next exam day |
+
+Each upcoming exam also has a **📣 Post** button that announces just that exam (useful after a change).
+
+**Automatic updates** (the switch under the buttons) post next week's exams every Friday at 6 PM and a reminder at
+8 PM the evening before each exam day. They're on by default; you can turn them off for your class there.
 
 ### 🔁 Making changes
 
-- **Edit anything at any time.** Tap **Edit** on an exam or course, change it, and save. The exam board and Messenger update immediately.
+- **Edit anything at any time.** Tap **Edit** on an exam or course, change it, and save. The bot and the exam list update immediately.
 - **Delete an exam** with **Delete** (you'll be asked to confirm).
 - **Past exams** are under **Exams → Past**.
 - **Removing a course** that already has exams only takes it off this term's list — its exam history is kept.
@@ -175,8 +177,23 @@ Students can ask about it — and see it on the exam board — the moment you sa
 
 - **Nothing is lost if a save fails.** Your entries stay in the form; just tap Save again.
 - **Closed the page by accident?** Your unfinished exam is restored the next time you tap **+ New exam**.
-- **Tapped Save twice?** Only one exam is created.
+- **Tapped Save twice?** Only one exam is created. Tapping a Post button twice posts once.
 - **Duplicates aren't allowed** — edit the existing exam instead. A Theoretical course has one CT 1 (CT 2, Mid…) per section; a Sessional course can't have two exams of the same type on the same day for the same section.
+
+---
+
+## 🧭 Setting up a new class
+
+Anyone with **Manage Channels** in the class's channel (usually the server admin or a CR):
+
+1. Make sure the bot is in your server and can **view** the channel and **send messages** in it.
+2. In the channel, run **`/setup name:<class name>`** — for example `/setup name:CSE 22 Section A`.
+   - Add **`cr_role:`** to choose a role whose members count as CRs.
+   - Add **`auto_updates:False`** if you don't want the automatic Friday and evening posts.
+3. That's it: the channel is now the class. A CR runs `/manage` and adds the term's faculty and courses.
+
+Run `/setup` again in the same channel to rename the class or change the CR role. Every channel you set up is a
+separate class with its own courses, exams and exam list.
 
 ---
 
@@ -186,32 +203,32 @@ Our academic week runs **Sunday to Thursday**, and all dates follow **Bangladesh
 
 | When you ask… | You get… |
 |---|---|
-| *"This week"* | From **today** until **Thursday** |
-| *"This week"* on **Friday or Saturday** | The week is over, so you're shown **next week** instead |
-| *"Next week"* | The **coming Sunday to Thursday** |
-| *"Tomorrow"*, *"Monday"*, *"27 October"* | That exact day |
-| *"Next exam"* | The nearest upcoming exam (all of them, if several are on the same day) |
+| `/this-week` | From **today** until **Thursday** |
+| `/this-week` on **Friday or Saturday** | The week is over, so you're shown **next week** instead |
+| `/next-week` | The **coming Sunday to Thursday** |
+| `/next-exam-day` | The nearest day with an exam, and **all** the exams on it (today counts until its exams have started) |
+| *"Tomorrow"*, *"Monday"*, *"27 October"* with `/ask` | That exact day |
 
 ---
 
 ## ❓ Frequently asked questions
 
 <details>
-<summary><b>The assistant says no exam has been posted. Does that mean there's no exam?</b></summary>
+<summary><b>The bot says no exam has been posted. Does that mean there's no exam?</b></summary>
 
 It means your CR hasn't posted one for that time yet. When in doubt, check with your CR or teacher.
 </details>
 
 <details>
-<summary><b>Do I need an account to see the exam board?</b></summary>
+<summary><b>The bot says this channel isn't linked to a class.</b></summary>
 
-No. Just open <a href="https://ai-cr-three.vercel.app/">the exam board</a>. Only CRs need to sign in.
+Commands only work in a channel that was set up with <code>/setup</code>. Use your class's channel, or ask someone with Manage Channels to set it up.
 </details>
 
 <details>
-<summary><b>The assistant asked me which course I meant.</b></summary>
+<summary><b>Do I need an account to see the exam list?</b></summary>
 
-Your words matched more than one course (for example, a theory course and its lab). Reply with the course code, such as <code>CSE-305</code>.
+No. Run <code>/exams</code> in your class channel and open the link.
 </details>
 
 <details>
@@ -223,13 +240,13 @@ That's a temporary connection problem, not "no exams". Try again in a minute.
 <details>
 <summary><b>Can students change exam information?</b></summary>
 
-No. Only signed-in class representatives can add or edit anything. Students can view the exam board and ask questions.
+No. Only CRs can open the editor, and an editor link only works for the class it was made for.
 </details>
 
 <details>
-<summary><b>I'm a new CR. How do I get access?</b></summary>
+<summary><b>My editor link stopped working.</b></summary>
 
-Ask the project maintainer to create your account and approve it as a CR.
+Editor links last 12 hours. Run <code>/manage</code> again for a new one.
 </details>
 
 <details>
