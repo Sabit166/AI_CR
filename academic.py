@@ -1,9 +1,7 @@
 """Academic business rules shared by the CR API and the student agent.
 
 Mirrors the SQL functions public.normalize_course_code / public.course_type_for_code
-(see supabase/migrations) and AI_CR/src/lib/academic.js. Keep the three in sync;
-tests/test_academic.py checks the Python side against the same vectors the
-database integration test uses.
+(see supabase/migrations) and AI_CR/src/lib/academic.js. Keep the three in sync.
 """
 from __future__ import annotations
 

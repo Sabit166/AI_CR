@@ -67,7 +67,7 @@ The original flat `"Exams"` table is left untouched; its rows were copied into t
 
 ### Business rules
 
-- **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`), with shared test vectors.
+- **Course code**: 2–5 letters + 3–4 digits (`CSE-415`, `cse 415`, `GEEM433` are all accepted and stored as `CSE-415`). The type comes from the **last digit of the number**: odd → Theoretical, even → Sessional. Codes such as `CSE-415A` or `415` are rejected instead of guessed. The rule exists in `academic.py`, `AI_CR/src/lib/academic.js` and SQL (`course_type_for_code`); keep the three in sync.
 - **Course sections (Theoretical)**: every Theoretical course has course sections A and B with one course teacher each; the same teacher may take both (so 1 or 2 distinct teachers). Sessional courses have no course sections and any number of teachers.
 - **Theoretical exams** are posted for course section A, B or both. The teacher is derived from the section (exam-level picks are ignored). Both sections sit an exam together, so `cr_save_exam` moves the other section's record of the same exam type to the saved date/time. Only one record per course section per exam type (whatever the date).
 - **Class sections**: only Sessional exams have one, and Sessional exams of different class sections may be at different times. The bot's `section` filter matches the class section or the course section (NULL rows always match).
@@ -144,7 +144,7 @@ Database failures are reported as such, never as "no exams".
 
 ```bash
 # Backend (Python 3.13)
-python -m venv env && env/Scripts/pip install -r requirements-dev.txt   # env/bin/pip on macOS/Linux
+python -m venv env && env/Scripts/pip install -r requirements.txt   # env/bin/pip on macOS/Linux
 cp .env.example .env            # fill in values
 env/Scripts/uvicorn main:app --host 127.0.0.1 --port 8001
 
@@ -163,26 +163,8 @@ separate test application, and register commands with `--guild`.
 
 ## Tests
 
-```bash
-# Unit + API tests (no network)
-env/Scripts/python -m pytest
-
-# Integration tests: real migrations in an isolated Postgres + PostgREST (Docker)
-docker compose -f tests/db/docker-compose.yml up -d --wait
-env/Scripts/python -m pytest tests/integration
-docker compose -f tests/db/docker-compose.yml down -v
-
-# Frontend
-cd AI_CR && npm run lint && npm test && npm run build
-
-# Mobile UI end-to-end (needs the Docker stack above and Google Chrome)
-env/Scripts/python tests/e2e/server.py                 # repo root, port 8011
-cd AI_CR && npm run e2e:build && npm run e2e:preview    # port 4179
-cd AI_CR && npm run e2e                                 # E2E_VERBOSE=1 logs failed API calls
-```
-
-Tests never touch Supabase or Discord: `tests/conftest.py` pins harmless settings, and the e2e server
-(`tests/e2e/server.py`) creates two classes, serves their links on `GET /e2e/links` and captures Discord posts.
+The automated test suites were removed from the repository on 2026-10-16 (see git history before that date to
+restore them: `git log --diff-filter=D -- tests`).
 
 ## Applying the database migration
 
