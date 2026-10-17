@@ -86,8 +86,7 @@ def _send(cls: dict, key: str, build) -> str:
         _remember(cls['id'], key)
         return 'already'
     try:
-        # Automatic posts notify everyone in the channel; on-demand posts don't.
-        client.post_messages(cls['discord_channel_id'], update.messages, ping_everyone=True)
+        client.post_messages(cls['discord_channel_id'], update.messages)
     except client.DiscordError as error:
         if error.code == client.UNKNOWN_CHANNEL:
             db_fetch.release_notification(cls['id'], key)

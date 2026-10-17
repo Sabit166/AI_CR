@@ -121,10 +121,11 @@ def link_button(label: str, url: str) -> list[dict]:
 EVERYONE = '@everyone'
 
 
-def post_messages(channel_id: str, messages: list[str], *, ping_everyone: bool = False) -> None:
-    """With ping_everyone, the first message starts with @everyone and only that message
-    may notify everyone (the bot needs "Mention @everyone" in the channel; without it
-    Discord shows the text but notifies nobody). Roles and users are never pinged."""
+def post_messages(channel_id: str, messages: list[str], *, ping_everyone: bool = True) -> None:
+    """Every channel post notifies everyone: the first message starts with @everyone and
+    only that message may ping (the bot needs "Mention @everyone" in the channel; without
+    it Discord shows the text but notifies nobody). Roles and users are never pinged.
+    Private (ephemeral) replies go through reply() and never ping."""
     for i, content in enumerate(messages):
         payload = message_payload(content)
         if ping_everyone and i == 0:
