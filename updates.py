@@ -25,6 +25,7 @@ UPDATE_FIELDS = (
 
 _MARKDOWN_RE = re.compile(r'([\\*_~`|>\[\]])')
 _LINE_START_RE = re.compile(r'^(\s*)(#{1,3}\s|-#\s)', re.MULTILINE)  # headings; lists are fine as lists
+_MASS_MENTION_RE = re.compile(r'@(everyone|here)', re.IGNORECASE)
 
 
 @dataclass
@@ -38,8 +39,10 @@ class Update:
 # Formatting
 # ---------------------------------------------------------------------------
 def escape(text: str | None) -> str:
-    """CR-typed text, shown literally in Discord (no bold, headings, links or quotes)."""
+    """CR-typed text, shown literally in Discord (no bold, headings, links, quotes or
+    @everyone/@here pings, even in a message that is allowed to ping everyone)."""
     escaped = _MARKDOWN_RE.sub(r'\\\1', (text or '').strip())
+    escaped = _MASS_MENTION_RE.sub('@​\\1', escaped)  # zero-width space breaks the mention
     return _LINE_START_RE.sub(lambda m: m.group(1) + '\\' + m.group(2), escaped)
 
 

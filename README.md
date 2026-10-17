@@ -61,6 +61,8 @@ You don't even have to ask:
 
 - **Every Friday at 6 PM** the bot posts **next week's exams**.
 - **At 8 PM the evening before an exam day** it posts all of that day's exams, with the time of each one.
+- Both of these tag **@everyone**, so everyone in the channel gets a notification. (The bot needs the
+  **Mention @everyone, @here, and All Roles** permission in the channel; it's included when you add the bot.)
 - Your CR can also post an update at any time — for a week, or for a single exam.
 
 ### The exam list

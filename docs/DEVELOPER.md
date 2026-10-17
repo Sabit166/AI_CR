@@ -80,7 +80,9 @@ The original flat `"Exams"` table is left untouched; its rows were copied into t
 
 Shared by the slash commands, the editor's Post buttons and the scheduler. Deterministic text from `exam_details`
 rows; CR-typed text is escaped so it can't become Discord markdown, every message is sent with
-`allowed_mentions: {parse: []}` (no `@everyone`/role pings), notes links are wrapped in `<…>` (no previews), and
+`allowed_mentions: {parse: []}` (no `@everyone`/role pings) — except the first message of an automatic post
+(Friday update, day-before reminder), which starts with `@everyone` and allows only that mention; `escape()` breaks
+any `@everyone`/`@here` a CR typed with a zero-width space — notes links are wrapped in `<…>` (no previews), and
 messages are split under 2000 characters on record boundaries.
 
 - `/this-week-update`: today → Thursday; Friday/Saturday says the week is over and shows next week.
@@ -141,6 +143,7 @@ Database failures are reported as such, never as "no exams".
    (leave Message Content, Server Members and Presence off).
 4. **Installation**: Installation Contexts → **Guild Install** only. Default install settings for Guild Install:
    scopes `applications.commands` and `bot`; permissions **View Channels**, **Send Messages**,
+   **Mention @everyone, @here, and All Roles** (for the automatic posts),
    **Send Messages in Threads**, **Embed Links**. Install link:
    https://discord.com/oauth2/authorize?client_id=1560680277808910479 (**Bot** → **Public Bot** on lets anyone use it).
 5. **Deploy the backend** with the env vars below, then in **General Information** set

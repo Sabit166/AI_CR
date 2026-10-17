@@ -118,9 +118,19 @@ def link_button(label: str, url: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Channel messages (bot token)
 # ---------------------------------------------------------------------------
-def post_messages(channel_id: str, messages: list[str]) -> None:
-    for content in messages:
-        request('POST', f'/channels/{channel_id}/messages', message_payload(content))
+EVERYONE = '@everyone'
+
+
+def post_messages(channel_id: str, messages: list[str], *, ping_everyone: bool = False) -> None:
+    """With ping_everyone, the first message starts with @everyone and only that message
+    may notify everyone (the bot needs "Mention @everyone" in the channel; without it
+    Discord shows the text but notifies nobody). Roles and users are never pinged."""
+    for i, content in enumerate(messages):
+        payload = message_payload(content)
+        if ping_everyone and i == 0:
+            payload['content'] = f'{EVERYONE} {content}'
+            payload['allowed_mentions'] = {'parse': ['everyone']}
+        request('POST', f'/channels/{channel_id}/messages', payload)
 
 
 def bot_guild_ids() -> set[str]:
